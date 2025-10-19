@@ -1,0 +1,13 @@
+# Core Dependencies
+streamlit
+langgraph
+langchain-core
+langchain-openai
+
+# API & Data
+requests
+google-search-results
+python-dotenv
+
+# Utilities
+diskcache

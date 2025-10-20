@@ -156,6 +156,30 @@ START -> chat_node -> [tools_condition]
 - **tools**: Executes selected tools
 - **tools_condition**: Routes to tools if needed, or ends if done
 
+## Graph Architecture
+
+The following diagram illustrates the LangGraph workflow architecture:
+
+![Agentic Chatbot Graph](assets/agentic_chatbot_graph.png)
+
+**Workflow Components:**
+
+- **`__start__`**: Entry point of the workflow
+- **`chat_node`**: Core conversational AI that processes user messages and decides actions
+- **`tools`**: Executes external tools (flights, hotels, weather, etc.) based on LLM decisions
+- **`__end__`**: Termination point when conversation is complete
+
+**Flow Description:**
+1. Workflow begins at `__start__` and proceeds to `chat_node`
+2. `chat_node` analyzes the user input and decides whether to:
+   - End the conversation (route to `__end__`)
+   - Use tools to gather information (route to `tools`)
+3. If tools are needed, `tools` executes the selected tool(s)
+4. After tool execution, control returns to `chat_node` for further processing
+5. This creates an iterative loop allowing the agent to use multiple tools and continue the conversation
+
+The dotted arrows represent conditional transitions based on the LLM's decision-making, while solid arrows show the standard flow path.
+
 ## Features in Detail
 
 ### Conversation Memory

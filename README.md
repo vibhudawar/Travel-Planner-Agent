@@ -2,6 +2,18 @@
 
 An intelligent travel planning assistant powered by LangGraph and LangChain that helps users plan complete trips using AI-powered tools and real-time data.
 
+---
+
+## 🎥 Project Walkthrough
+
+Watch the complete project walkthrough to see the Agentic Chatbot in action:
+
+[![Agentic Chatbot Walkthrough](https://img.youtube.com/vi/mw7kImMa-bc/maxresdefault.jpg)](https://youtu.be/mw7kImMa-bc)
+
+*Click the image above to watch the full walkthrough on YouTube*
+
+---
+
 ## Features
 
 - **Conversational Trip Planning** - Natural language interface for planning trips

@@ -28,6 +28,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from langchain_core.messages import HumanMessage  # noqa: E402
 from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 
+import observability  # noqa: E402
 from backend import build_graph  # noqa: E402
 from evals import judges, metrics  # noqa: E402
 from evals.fixture_backend import fixtures_active  # noqa: E402
@@ -48,13 +49,16 @@ def load_golden(path: Path = _GOLDEN) -> List[dict]:
     return scenarios
 
 
-def run_scenario(app, scenario: dict) -> dict:
+def run_scenario(app, scenario: dict):
+    """Run one scenario against fixtures; return (final_state, usage_metadata)."""
     config = {
         "configurable": {"thread_id": f"eval-{scenario['id']}"},
         "recursion_limit": _RECURSION_LIMIT,
     }
-    with fixtures_active(scenario.get("fixtures")):
-        return app.invoke({"messages": [HumanMessage(content=scenario["query"])]}, config=config)
+    with observability.track_usage() as cb:
+        with fixtures_active(scenario.get("fixtures")):
+            state = app.invoke({"messages": [HumanMessage(content=scenario["query"])]}, config=config)
+    return state, cb.usage_metadata
 
 
 def score_scenario(
@@ -111,6 +115,23 @@ def _groundedness_summary(results: List[dict]) -> dict:
     return {**agg, "mean_score": mean_score, "total_facts": total_facts}
 
 
+def _cost_summary(results: List[dict]) -> dict:
+    """Mean cost + tokens per full-trip itinerary (simple/multi_constraint)."""
+    trips = [
+        r for r in results
+        if r["type"] in ("simple", "multi_constraint") and r.get("cost_usd") is not None
+    ]
+    if not trips:
+        return {"n": 0}
+    costs = [r["cost_usd"] for r in trips]
+    return {
+        "n": len(trips),
+        "mean_usd_per_itinerary": round(sum(costs) / len(costs), 6),
+        "mean_input_tokens": round(sum(r["tokens"]["input"] for r in trips) / len(trips)),
+        "mean_output_tokens": round(sum(r["tokens"]["output"] for r in trips) / len(trips)),
+    }
+
+
 def build_report(version: str, results: List[dict], use_judge: bool) -> dict:
     settings = get_settings()
     scoreboard = {
@@ -131,6 +152,8 @@ def build_report(version: str, results: List[dict], use_judge: bool) -> dict:
         "judge_model": settings.judge_model if use_judge else None,
         "n_scenarios": len(results),
         "scoreboard": scoreboard,
+        "cost": _cost_summary(results),
+        "tracing_enabled": bool(get_settings().langsmith_tracing),
         "scenarios": results,
     }
 
@@ -150,6 +173,12 @@ def print_scoreboard(report: dict) -> None:
     g = sb["groundedness"]
     if g.get("mean_score") is not None:
         print(f"  {'':<18}mean fact-level groundedness score: {g['mean_score']} over {g['total_facts']} facts")
+    cost = report.get("cost") or {}
+    if cost.get("n"):
+        print("  " + "-" * 44)
+        print(f"  cost/itinerary    ${cost['mean_usd_per_itinerary']:.4f}  "
+              f"(~{cost['mean_input_tokens']} in / {cost['mean_output_tokens']} out tokens, n={cost['n']})")
+        print(f"  tracing           {'on (LangSmith)' if report.get('tracing_enabled') else 'off'}")
     print("=" * 60)
 
 
@@ -180,13 +209,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     for scenario in scenarios:
         row: Dict[str, Any] = {"id": scenario["id"], "type": scenario["type"], "error": None}
         try:
-            state = run_scenario(app, scenario)
+            state, usage = run_scenario(app, scenario)
+            cost = observability.compute_cost(usage)
             traj = metrics.extract_trajectory(state["messages"])
             itinerary = state.get("itinerary")
             row["metrics"] = score_scenario(scenario, traj, itinerary, use_judge)
             row["called_tools"] = sorted(traj.called_tool_names)
             row["has_itinerary"] = itinerary is not None
             row["itinerary"] = itinerary  # committed for audit / inspection
+            row["cost_usd"] = cost["total_usd"]
+            row["tokens"] = {"input": cost["input_tokens"], "output": cost["output_tokens"]}
             row["final_answer_preview"] = (traj.final_answer or "")[:300]
         except Exception as exc:  # noqa: BLE001 - isolate a bad scenario, don't crash the run
             row["error"] = f"{type(exc).__name__}: {exc}"

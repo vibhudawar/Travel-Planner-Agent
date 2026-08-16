@@ -426,11 +426,21 @@ the cheap judge it produced only formatting noise (flagging `price` vs `price_pe
 mechanism, and the LLM pass is opt-in for semantic checks with a stronger judge. Full 7-metric
 scoreboard all 100%; this run also confirmed WIN 5/6 live after the credit top-up.
 
+**WIN 8 finding (2026-08-17):** observability shipped. LangSmith tracing is wired **through
+settings** — a real bug fix: WIN 1 moved config to pydantic-settings (dropping `load_dotenv`), so
+the `LANGSMITH_*` values in `.env` never reached `os.environ` and LangChain's auto-tracing was
+silently doing nothing; `observability.configure_tracing()` now pushes them into `os.environ` when
+enabled (near-no-op when off) and traces verified landing in the `TripPlannerAgent` project.
+Per-itinerary **token/cost accounting** via LangChain's usage-metadata callback + a price table
+gives the first real **cost baseline: $0.0393/itinerary** (~7,657 input / 2,016 output tokens,
+gpt-4o, mean over 4 trips) — the number WIN 8.5 must move ≥50% via prompt caching, parallel tool
+calls, history compaction, and model tiering. All 7 quality metrics unchanged at 100%.
+
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 
 | Version | $/itinerary | LLM turns/trip | Cached-input % | Cache hit-rate | Cache-correctness |
 |---|---|---|---|---|---|
-| baseline (pre-caching) | — | — (sequential) | ~0 | — | — |
+| baseline (WIN 8, 2026-08-17, gpt-4o) | $0.0393 | sequential | ~0 | n/a | n/a |
 | + prompt-cache prefix | | | | n/a | n/a |
 | + parallel tool calls | | | | n/a | n/a |
 | + history compaction | | | | n/a | n/a |

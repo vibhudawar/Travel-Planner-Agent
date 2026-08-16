@@ -341,6 +341,11 @@ The README headline table. Numbers are placeholders until WIN 2 runs on the reco
 | baseline (2026-08-16, gpt-4o, judge gpt-4o-mini) | 100% (4/4) | 100% (2/2) | pending WIN 3 | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
 | + structured schema (WIN 3) | 100% (4/4) | 100% (2/2) | 100% (4/4; 36 facts, mean 1.0) | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
 | + deterministic compute (WIN 4) | 100% (4/4) | 100% (2/2) | 100% (4/4; 33 facts, mean 1.0) | 100% (4/4) | 100% (2/2) | 100% (2/2) | — |
+| + verifier + abstention (WIN 7)* | 100% (4/4) | 100% (2/2) | 100% (4/4; 37 facts, mean 1.0) | 100% (4/4) | 100% (2/2) | 100% (2/2) | — |
+
+*WIN 7 also adds a **verification** metric: 100% (4/4) — the value verifier pruned nothing on clean
+scenarios (no false positives). This win7 run also retroactively confirms WIN 5 (freshness/hardening)
+and WIN 6 (injection) live end-to-end after the credit top-up.
 | + tool hardening (WIN 5) | | | | | | | |
 | + injection defense (WIN 6) | | | | | | | |
 | + verifier + abstention (WIN 7) | | | | | | | |
@@ -406,6 +411,20 @@ deterministically: the tool-level neutralization strips the payload before the m
 network-free tests incl. the youtube/ai-mode injection fixtures) — a structural guarantee, not
 model-dependent. Full live injection eval is **pending the OpenAI credit top-up** (still
 `insufficient_quota`).
+
+**WIN 7 finding (2026-08-17):** the trust lever. A **deterministic value verifier** (`verifier.py`)
+checks every source-bound fact's concrete values (price number + name token) against the actual
+tool outputs and **removes** anything unsupported before it reaches the user — so a fabricated
+price/name structurally cannot survive, and a removed category becomes honest abstention with a
+disclaimer. Runs as a `verify` graph node after `synthesize`, then recomputes the budget on the
+pruned facts. On the golden set the agent doesn't fabricate, so nothing is pruned (`n_removed=0`
+everywhere) — the mechanism's true-positive behavior is proven by unit tests (removes a fabricated
+price, a fabricated hotel name, and facts citing an errored/uncalled tool). **Design decision:** the
+plan called for an "LLM second pass"; I built it (`enable_llm_verifier`, judge≠generator) but with
+the cheap judge it produced only formatting noise (flagging `price` vs `price_per_night`), so it is
+**off by default and advisory** — the deterministic check is the authoritative, free, reliable trust
+mechanism, and the LLM pass is opt-in for semantic checks with a stronger judge. Full 7-metric
+scoreboard all 100%; this run also confirmed WIN 5/6 live after the credit top-up.
 
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 

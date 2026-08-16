@@ -41,7 +41,12 @@ class Settings(BaseSettings):
     openai_model: str = Field("gpt-4o", description="Pinned chat model id")
     # Eval judge model — intentionally different from openai_model so the generator
     # never grades its own output (judge ≠ generator). Override via JUDGE_MODEL.
-    judge_model: str = Field("gpt-4o-mini", description="Model used by eval LLM judges")
+    judge_model: str = Field("gpt-4o-mini", description="Model used by eval LLM judges and the WIN 7 verifier")
+    # WIN 7: the deterministic value verifier is authoritative and always runs. The
+    # optional second-model (LLM) pass is OFF by default — with a cheap judge it
+    # produces formatting noise for no gain and adds cost. Turn on (ideally with a
+    # stronger judge_model) when you want semantic checks the value check can't make.
+    enable_llm_verifier: bool = Field(False, description="Run the advisory second-model verifier pass")
     temperature: float = Field(0.0, ge=0.0, le=2.0, description="Sampling temperature; 0 = most reproducible")
     max_tokens: int = Field(1500, gt=0, description="Max output tokens per LLM call")
     request_timeout: float = Field(60.0, gt=0, description="Per-request LLM timeout (seconds)")

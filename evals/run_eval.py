@@ -72,6 +72,7 @@ def score_scenario(
     if stype in ("simple", "multi_constraint"):
         scored["groundedness"] = metrics.groundedness(itinerary, traj)
         scored["budget_math"] = metrics.budget_math(itinerary)
+        scored["verification"] = metrics.verification(itinerary)
 
     if stype == "tool_error":
         if use_judge:
@@ -121,6 +122,7 @@ def build_report(version: str, results: List[dict], use_judge: bool) -> dict:
         "injection": metrics.aggregate(_passes_for(results, "injection")),
         "groundedness": _groundedness_summary(results),
         "budget_math": metrics.aggregate(_passes_for(results, "budget_math", {"simple", "multi_constraint"})),
+        "verification": metrics.aggregate(_passes_for(results, "verification", {"simple", "multi_constraint"})),
     }
     return {
         "version": version,
@@ -141,7 +143,7 @@ def print_scoreboard(report: dict) -> None:
     print("=" * 60)
     print(f"  {'metric':<18}{'passed':>8}{'scored':>8}{'accuracy':>12}")
     print("  " + "-" * 44)
-    for name in ("tool_selection", "slot_filling", "abstention", "injection", "groundedness", "budget_math"):
+    for name in ("tool_selection", "slot_filling", "abstention", "injection", "groundedness", "budget_math", "verification"):
         m = sb[name]
         acc = "n/a" if m["accuracy"] is None else f"{m['accuracy']:.1%}"
         print(f"  {name:<18}{m['passed']:>8}{m['n']:>8}{acc:>12}")

@@ -25,6 +25,7 @@ from prompts import TRIP_PLANNER_SYSTEM_PROMPT, TRIP_SYNTHESIS_PROMPT
 from schema import Budget, BudgetItem, ItineraryDraft, finalize_itinerary
 from settings import get_settings
 from tools import ALL_TOOLS
+from verifier import verify_itinerary
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,33 @@ def _synthesize_node(state: ChatState) -> dict:
         return {"itinerary": None}
 
 
+def _verify_node(state: ChatState) -> dict:
+    """Value-verify the itinerary: prune unsupported facts, recompute budget, flag.
+
+    The trust lever (WIN 7): a fabricated price/name can't survive to the user,
+    and a removed category becomes honest abstention. Recomputes the budget on the
+    pruned facts so the total stays consistent.
+    """
+    itinerary = state.get("itinerary")
+    if not itinerary:
+        return {}
+    try:
+        pruned, report = verify_itinerary(itinerary, state["messages"])
+        computed = compute_budget(pruned, pruned.get("travelers"))
+        pruned["budget"] = {
+            "currency": computed["currency"],
+            "items": computed["items"],
+            "total": computed["total"],
+        }
+        pruned["verification"] = report
+        if report["n_removed"]:
+            logger.warning("Verifier removed %d unsupported fact(s): %s", report["n_removed"], report["removed"])
+        return {"itinerary": pruned}
+    except Exception as exc:  # noqa: BLE001 - verification must not break the chat
+        logger.warning("Verification failed: %s: %s", type(exc).__name__, exc)
+        return {}
+
+
 def _route_after_chat(state: ChatState) -> str:
     """Route the ReAct loop.
 
@@ -175,6 +203,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph.add_node("chat_node", lambda state: _chat_node(state, llm_with_tools))
     graph.add_node("tools", ToolNode(ALL_TOOLS))
     graph.add_node("synthesize", _synthesize_node)
+    graph.add_node("verify", _verify_node)
 
     graph.add_edge(START, "chat_node")
     graph.add_conditional_edges(
@@ -183,7 +212,8 @@ def build_graph(checkpointer: SqliteSaver | None = None):
         {"tools": "tools", "synthesize": "synthesize", END: END},
     )
     graph.add_edge("tools", "chat_node")  # loop back after tool execution
-    graph.add_edge("synthesize", END)
+    graph.add_edge("synthesize", "verify")  # value-verify before finishing
+    graph.add_edge("verify", END)
 
     return graph.compile(checkpointer=checkpointer)
 

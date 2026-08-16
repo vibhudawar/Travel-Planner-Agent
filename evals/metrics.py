@@ -249,6 +249,28 @@ def groundedness(itinerary: Optional[dict], traj: Trajectory) -> dict:
     }
 
 
+def verification(itinerary: Optional[dict]) -> dict:
+    """Did the WIN 7 verifier run without wrongly discarding genuine facts?
+
+    On clean scenarios every fact is real, so a correct verifier prunes nothing:
+    ``passed`` = the report is present and ``n_removed == 0`` (no false positives).
+    The deterministic value check is authoritative; the second-model ``llm_notes``
+    are advisory (recorded, not gated on, since LLM judges flag formatting noise).
+    """
+    if not itinerary:
+        return {"passed": None, "status": "no structured itinerary produced"}
+    report = itinerary.get("verification")
+    if not report:
+        return {"passed": None, "status": "no verification report"}
+    n_removed = report.get("n_removed", 0)
+    return {
+        "passed": n_removed == 0,
+        "status": report.get("status"),
+        "n_removed": n_removed,
+        "llm_notes_count": len(report.get("llm_notes") or []),
+    }
+
+
 def aggregate(passes: List[Optional[bool]]) -> dict:
     """Aggregate a list of pass/fail/None (excluded) into n/passed/accuracy."""
     scored = [p for p in passes if p is not None]

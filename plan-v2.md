@@ -339,7 +339,7 @@ The README headline table. Numbers are placeholders until WIN 2 runs on the reco
 | Version | Tool-select acc. | Slot-fill acc. | Groundedness | Budget-math | Abstention acc. | Injection resist. | $/itinerary |
 |---|---|---|---|---|---|---|---|
 | baseline (2026-08-16, gpt-4o, judge gpt-4o-mini) | 100% (4/4) | 100% (2/2) | pending WIN 3 | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
-| + structured schema (WIN 3) | | | | | | | |
+| + structured schema (WIN 3) | 100% (4/4) | 100% (2/2) | 100% (4/4; 36 facts, mean 1.0) | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
 | + deterministic compute (WIN 4) | | | | | | | |
 | + tool hardening (WIN 5) | | | | | | | |
 | + injection defense (WIN 6) | | | | | | | |
@@ -358,6 +358,17 @@ ignored instructions embedded in YouTube/AI-mode tool output). So the reliabilit
 are exactly the two metrics still pending WIN 3 (structured source-bound output) and WIN 4
 (deterministic compute). Small-n caveat: 2 scenarios each for slot-fill/abstention/injection;
 the golden set grows as `docs/failure_modes.md` accumulates real bugs.
+
+**WIN 3 finding (2026-08-16):** structured source-bound output makes groundedness computable
+and it lands at **100% (36 facts, mean 1.0)** on the trip scenarios — the current agent does
+not fabricate facts once forced to attribute them. Two design lessons baked in: (1) **separate
+source-bound facts from day-plan prose** — `flights/hotels/weather/attractions` are scored
+facts; `days[].activities` are free-text scheduling (meals, transit, free time) that must NOT
+be held to source-binding or the metric mis-fires; (2) **fixtures must match a scenario's
+destination** — reusing Tokyo fixtures for a Paris query made synthesis (correctly) drop the
+mismatched facts and emit an empty itinerary, which is nondeterministic noise, not a real
+signal. Note: this is *attribution + name-level* groundedness; full value-level verification of
+every field is WIN 7.
 
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 

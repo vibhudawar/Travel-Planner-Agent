@@ -87,6 +87,56 @@ def test_aggregate_excludes_none():
     assert agg == {"n": 3, "passed": 2, "accuracy": round(2 / 3, 3)}
 
 
+# --- groundedness (WIN 3) ----------------------------------------------------
+def _traj_with_results():
+    msgs = [
+        HumanMessage(content="x"),
+        _ai_tool_call("search_flights"),
+        ToolMessage(content="{'flights': [{'airline': 'ANA', 'price': 812}]}", name="search_flights", tool_call_id="1"),
+        _ai_tool_call("search_hotels"),
+        ToolMessage(content="{'hotels': [{'name': 'Shinjuku Granbell Hotel'}]}", name="search_hotels", tool_call_id="2"),
+        _ai_tool_call("search_attractions"),
+        ToolMessage(content="{'attractions': [{'name': 'Senso-ji Temple'}]}", name="search_attractions", tool_call_id="3"),
+        AIMessage(content="done"),
+    ]
+    return metrics.extract_trajectory(msgs)
+
+
+def test_groundedness_all_grounded_and_ignores_day_prose():
+    itin = {
+        "flights": [{"airline": "ANA", "source_tool": "search_flights"}],
+        "hotels": [{"name": "Shinjuku Granbell Hotel", "source_tool": "search_hotels"}],
+        "attractions": [{"name": "Senso-ji Temple", "source_tool": "search_attractions"}],
+        "weather": [],
+        # day-plan prose must NOT be scored as facts
+        "days": [{"day": 1, "activities": ["Check into hotel", "Dinner in Shibuya"]}],
+    }
+    r = metrics.groundedness(itin, _traj_with_results())
+    assert r["score"] == 1.0 and r["passed"] is True and r["n_facts"] == 3
+
+
+def test_groundedness_flags_fabricated_and_misattributed():
+    itin = {
+        "flights": [{"airline": "Fake Air", "source_tool": "search_flights"}],  # value absent from result
+        "hotels": [{"name": "Ghost Hotel", "source_tool": "search_hotels"}],  # value absent from result
+        "weather": [{"summary": "sunny", "source_tool": "search_weather"}],  # tool never called
+        "days": [],
+    }
+    r = metrics.groundedness(itin, _traj_with_results())
+    assert r["score"] == 0.0 and r["passed"] is False and len(r["ungrounded"]) == 3
+
+
+def test_groundedness_no_itinerary():
+    r = metrics.groundedness(None, metrics.extract_trajectory([HumanMessage(content="x")]))
+    assert r["passed"] is None and r["score"] is None
+
+
+def test_groundedness_zero_facts_is_excluded_not_failed():
+    # An itinerary with no source-bound facts has nothing to score -> excluded.
+    r = metrics.groundedness({"flights": [], "hotels": [], "weather": [], "attractions": []}, _traj_with_results())
+    assert r["passed"] is None and r["score"] is None and r["n_facts"] == 0
+
+
 # --- fixture backend (no network) --------------------------------------------
 def test_fixtures_drive_tool_output():
     import tools

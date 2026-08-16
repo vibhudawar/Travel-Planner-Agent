@@ -48,17 +48,18 @@ def load_golden(path: Path = _GOLDEN) -> List[dict]:
     return scenarios
 
 
-def run_scenario(app, scenario: dict) -> metrics.Trajectory:
+def run_scenario(app, scenario: dict) -> dict:
     config = {
         "configurable": {"thread_id": f"eval-{scenario['id']}"},
         "recursion_limit": _RECURSION_LIMIT,
     }
     with fixtures_active(scenario.get("fixtures")):
-        state = app.invoke({"messages": [HumanMessage(content=scenario["query"])]}, config=config)
-    return metrics.extract_trajectory(state["messages"])
+        return app.invoke({"messages": [HumanMessage(content=scenario["query"])]}, config=config)
 
 
-def score_scenario(scenario: dict, traj: metrics.Trajectory, use_judge: bool) -> Dict[str, Any]:
+def score_scenario(
+    scenario: dict, traj: metrics.Trajectory, itinerary: Optional[dict], use_judge: bool
+) -> Dict[str, Any]:
     stype = scenario["type"]
     scored: Dict[str, Any] = {}
 
@@ -67,6 +68,9 @@ def score_scenario(scenario: dict, traj: metrics.Trajectory, use_judge: bool) ->
 
     if stype == "underspecified":
         scored["slot_filling"] = metrics.slot_filling(traj)
+
+    if stype in ("simple", "multi_constraint"):
+        scored["groundedness"] = metrics.groundedness(itinerary, traj)
 
     if stype == "tool_error":
         if use_judge:
@@ -95,6 +99,16 @@ def _passes_for(results: List[dict], metric: str, types: Optional[set] = None) -
     return out
 
 
+def _groundedness_summary(results: List[dict]) -> dict:
+    """Aggregate groundedness: pass rate plus mean fact-level score."""
+    entries = [r["metrics"]["groundedness"] for r in results if "groundedness" in r["metrics"]]
+    scored = [e for e in entries if e.get("score") is not None]
+    agg = metrics.aggregate([e.get("passed") for e in entries])
+    mean_score = round(sum(e["score"] for e in scored) / len(scored), 3) if scored else None
+    total_facts = sum(e.get("n_facts", 0) for e in scored)
+    return {**agg, "mean_score": mean_score, "total_facts": total_facts}
+
+
 def build_report(version: str, results: List[dict], use_judge: bool) -> dict:
     settings = get_settings()
     scoreboard = {
@@ -104,7 +118,7 @@ def build_report(version: str, results: List[dict], use_judge: bool) -> dict:
         "slot_filling": metrics.aggregate(_passes_for(results, "slot_filling")),
         "abstention": metrics.aggregate(_passes_for(results, "abstention")),
         "injection": metrics.aggregate(_passes_for(results, "injection")),
-        "groundedness": {"status": "pending WIN 3 (structured source-bound output)"},
+        "groundedness": _groundedness_summary(results),
         "budget_math": {"status": "pending WIN 4 (deterministic compute)"},
     }
     return {
@@ -126,12 +140,14 @@ def print_scoreboard(report: dict) -> None:
     print("=" * 60)
     print(f"  {'metric':<18}{'passed':>8}{'scored':>8}{'accuracy':>12}")
     print("  " + "-" * 44)
-    for name in ("tool_selection", "slot_filling", "abstention", "injection"):
+    for name in ("tool_selection", "slot_filling", "abstention", "injection", "groundedness"):
         m = sb[name]
         acc = "n/a" if m["accuracy"] is None else f"{m['accuracy']:.1%}"
         print(f"  {name:<18}{m['passed']:>8}{m['n']:>8}{acc:>12}")
+    g = sb["groundedness"]
+    if g.get("mean_score") is not None:
+        print(f"  {'':<18}mean fact-level groundedness score: {g['mean_score']} over {g['total_facts']} facts")
     print("  " + "-" * 44)
-    print(f"  groundedness      {sb['groundedness']['status']}")
     print(f"  budget_math       {sb['budget_math']['status']}")
     print("=" * 60)
 
@@ -163,9 +179,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     for scenario in scenarios:
         row: Dict[str, Any] = {"id": scenario["id"], "type": scenario["type"], "error": None}
         try:
-            traj = run_scenario(app, scenario)
-            row["metrics"] = score_scenario(scenario, traj, use_judge)
+            state = run_scenario(app, scenario)
+            traj = metrics.extract_trajectory(state["messages"])
+            itinerary = state.get("itinerary")
+            row["metrics"] = score_scenario(scenario, traj, itinerary, use_judge)
             row["called_tools"] = sorted(traj.called_tool_names)
+            row["has_itinerary"] = itinerary is not None
+            row["itinerary"] = itinerary  # committed for audit / inspection
             row["final_answer_preview"] = (traj.final_answer or "")[:300]
         except Exception as exc:  # noqa: BLE001 - isolate a bad scenario, don't crash the run
             row["error"] = f"{type(exc).__name__}: {exc}"

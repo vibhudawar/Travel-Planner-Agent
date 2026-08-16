@@ -294,14 +294,17 @@ def search_flights(
         logger.error(f"Flight search error: {result['error']}")
         return {"flights": [], "error": result["error"], "retrieved_at": _now_iso()}
 
-    # Extract best flights
+    # Extract best flights, cheapest first, and keep a slim top-5 (WIN 8.5) so the
+    # cheapest option is always present while re-sent context stays small.
     best_flights = result.get("best_flights", [])
     other_flights = result.get("other_flights", [])
-    all_flights = best_flights + other_flights
+    all_flights = sorted(
+        best_flights + other_flights,
+        key=lambda f: f.get("price") if f.get("price") is not None else float("inf"),
+    )
 
-    # Format flight data
     flights = []
-    for flight in all_flights[:10]:  # Top 10 flights
+    for flight in all_flights[:5]:
         flights.append({
             "price": flight.get("price"),
             "airline": ", ".join([leg.get("airline", "") for leg in flight.get("flights", [])]),
@@ -378,17 +381,16 @@ def search_hotels(
 
     sorted_properties = sorted(properties, key=calculate_value_score, reverse=True)
 
-    # Format hotel data
+    # Slim top-5 (WIN 8.5): keep booking-relevant fields, drop the long description.
     hotels = []
-    for prop in sorted_properties[:10]:  # Top 10 hotels
+    for prop in sorted_properties[:5]:
         hotels.append({
             "name": prop.get("name"),
             "price": prop.get("rate_per_night", {}).get("extracted_lowest"),
             "rating": prop.get("overall_rating"),
             "reviews": prop.get("reviews"),
-            "amenities": prop.get("amenities", [])[:5],
+            "amenities": prop.get("amenities", [])[:3],
             "link": prop.get("link"),
-            "description": prop.get("description", "")[:200]
         })
 
     logger.info(f"Found {len(hotels)} hotels in {location}")
@@ -528,17 +530,15 @@ def search_attractions(location: str, category: str = "tourist_attraction") -> d
     # Extract local results
     local_results = result.get("local_results", [])
 
-    # Format attraction data
+    # Slim top-8 (WIN 8.5): trim description; keep name/type for grounding + planning.
     attractions = []
-    for place in local_results[:15]:  # Top 15 attractions
+    for place in local_results[:8]:
         attractions.append({
             "name": place.get("title"),
             "rating": place.get("rating"),
-            "reviews": place.get("reviews"),
             "type": place.get("type"),
-            "address": place.get("address"),
-            # Name/address kept intact (grounding identifiers); description is free text.
-            "description": _neutralize_injection(place.get("description", "")[:200])
+            # Name kept intact (grounding identifier); description is free text.
+            "description": _neutralize_injection((place.get("description") or "")[:120])
         })
 
     logger.info(f"Found {len(attractions)} attractions in {location}")
@@ -573,17 +573,14 @@ def search_youtube_vlogs(query: str, max_results: int = 5) -> dict:
     video_results = result.get("video_results", [])
 
     # Format video data
+    # Slim (WIN 8.5): title/channel/link are what the itinerary needs.
     videos = []
-    for video in video_results[:max_results]:
+    for video in video_results[: min(max_results, 3)]:
         videos.append({
             # Titles/channels are attacker-controllable free text -> neutralize.
             "title": _neutralize_injection(video.get("title")),
             "channel": _neutralize_injection(video.get("channel", {}).get("name")),
-            "views": video.get("views"),
-            "published": video.get("published_date"),
-            "duration": video.get("length"),
             "link": video.get("link"),
-            "thumbnail": video.get("thumbnail", {}).get("static")
         })
 
     logger.info(f"Found {len(videos)} YouTube videos for '{query}'")

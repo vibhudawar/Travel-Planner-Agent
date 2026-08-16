@@ -64,8 +64,19 @@ def get_llm() -> ChatOpenAI:
 
 @lru_cache(maxsize=1)
 def _get_structurer():
-    """LLM bound to structured itinerary output (no tools). Built once."""
-    return get_llm().with_structured_output(ItineraryDraft)
+    """LLM bound to structured itinerary output (no tools), on the cheaper
+    synthesis model (WIN 8.5 tiering). Built once."""
+    settings = get_settings()
+    logger.info("Synthesis model=%s", settings.effective_synthesis_model)
+    llm = ChatOpenAI(
+        model=settings.effective_synthesis_model,
+        temperature=settings.temperature,
+        max_tokens=settings.synthesis_max_tokens,  # higher: structured JSON can be long
+        timeout=settings.request_timeout,
+        max_retries=settings.max_retries,
+        api_key=settings.openai_api_key.get_secret_value(),
+    )
+    return llm.with_structured_output(ItineraryDraft)
 
 
 @lru_cache(maxsize=1)

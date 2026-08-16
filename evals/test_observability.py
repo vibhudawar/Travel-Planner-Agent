@@ -19,6 +19,20 @@ def test_price_for_exact_and_prefix():
     assert observability._price_for("totally-unknown-model") == {"input": 0.0, "output": 0.0}
 
 
+def test_longest_prefix_wins_mini_not_4o():
+    # "gpt-4o-mini-..." must resolve to gpt-4o-mini, not gpt-4o (the earlier bug).
+    assert observability._price_for("gpt-4o-mini-2024-07-18") == observability._price_for("gpt-4o-mini")
+    assert observability._price_for("gpt-5.4-nano")["output"] == 1.25
+
+
+def test_cost_credits_cached_input():
+    usage = {"gpt-4o": {"input_tokens": 1_000_000, "output_tokens": 0,
+                        "input_token_details": {"cache_read": 1_000_000}}}
+    # all input cached -> 1M * $2.50 * 0.5 discount = $1.25
+    cost = observability.compute_cost(usage)
+    assert cost["total_usd"] == 1.25 and cost["cached_input_tokens"] == 1_000_000
+
+
 def test_compute_cost():
     usage = {
         "gpt-4o": {"input_tokens": 1_000_000, "output_tokens": 500_000},

@@ -85,6 +85,27 @@ def _chat_node(state: ChatState, llm_with_tools) -> dict:
     return {"messages": [llm_with_tools.invoke(messages)]}
 
 
+def _extract_weather_meta(messages) -> tuple:
+    """Pull (is_forecast, label) from the search_weather tool result, if any."""
+    import ast
+    import json as _json
+
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage) and getattr(msg, "name", None) == "search_weather":
+            content = msg.content
+            data = content if isinstance(content, dict) else None
+            if data is None:
+                for parser in (_json.loads, ast.literal_eval):
+                    try:
+                        data = parser(content)
+                        break
+                    except Exception:  # noqa: BLE001 - best-effort parse
+                        continue
+            if isinstance(data, dict):
+                return data.get("is_forecast"), data.get("label")
+    return None, None
+
+
 def _synthesize_node(state: ChatState) -> dict:
     """Turn the gathered conversation into a structured, source-bound itinerary.
 
@@ -98,6 +119,15 @@ def _synthesize_node(state: ChatState) -> dict:
             [SystemMessage(content=TRIP_SYNTHESIS_PROMPT)] + messages
         )
         itinerary = finalize_itinerary(draft, called_tools)
+        # Code-authored weather labelling (WIN 5): stamp forecast-vs-seasonal from
+        # the actual tool result so a trip months out never shows a "forecast".
+        is_forecast, weather_label = _extract_weather_meta(messages)
+        if weather_label is not None:
+            for w in itinerary.weather:
+                if w.is_forecast is None:
+                    w.is_forecast = is_forecast
+                if not w.label:
+                    w.label = weather_label
         # Deterministic budget: overwrite the model's proposed budget with one
         # computed in code from the source-bound facts + real dates (WIN 4), so
         # the total always adds up and is grounded rather than LLM-guessed.

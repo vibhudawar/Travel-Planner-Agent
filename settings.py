@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     request_timeout: float = Field(60.0, gt=0, description="Per-request LLM timeout (seconds)")
     max_retries: int = Field(2, ge=0, description="LLM client retry count on transient errors")
 
+    # --- Tool hardening & freshness (WIN 5) ---
+    # Volatile data (prices/availability) gets a short TTL; slow-moving data a long
+    # one. Freshness matters when you're about to book.
+    cache_ttl_volatile_hours: float = Field(1.0, gt=0, description="TTL for flights/hotels (prices move)")
+    cache_ttl_stable_hours: float = Field(24.0, gt=0, description="TTL for attractions/vlogs/web search")
+    cache_ttl_weather_hours: float = Field(6.0, gt=0, description="TTL for weather")
+    serpapi_timeout_seconds: float = Field(30.0, gt=0, description="Per-request SerpAPI timeout")
+    serpapi_max_retries: int = Field(2, ge=0, description="Retries on transient SerpAPI/network errors")
+    # Weather forecasts are only meaningful within this horizon; beyond it a trip
+    # gets seasonal expectations, clearly labelled — never fiction presented as a forecast.
+    weather_forecast_horizon_days: int = Field(14, gt=0, description="Max days out a real forecast is trusted")
+
     # --- Infrastructure ---
     # Defaults are absolute (anchored to the project root) so they don't depend
     # on the launch directory; override with an absolute path via env if desired.

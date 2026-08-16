@@ -62,6 +62,10 @@ class Activity(BaseModel):
 class WeatherDay(BaseModel):
     date: Optional[str] = None
     summary: str
+    # Set in code from the weather tool result (WIN 5) — never present seasonal
+    # averages as a live forecast.
+    is_forecast: Optional[bool] = None
+    label: Optional[str] = None
     source_tool: SourceTool = SourceTool.weather
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Optional
 
 from pydantic import Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -51,6 +52,15 @@ class Settings(BaseSettings):
     max_tokens: int = Field(1500, gt=0, description="Max output tokens per LLM call")
     request_timeout: float = Field(60.0, gt=0, description="Per-request LLM timeout (seconds)")
     max_retries: int = Field(2, ge=0, description="LLM client retry count on transient errors")
+
+    # --- Observability (WIN 8) ---
+    # LangSmith tracing is wired through here so the LANGSMITH_* values in .env
+    # actually reach LangChain (pydantic-settings loads .env into this object, not
+    # os.environ). configure_tracing() pushes them into os.environ when enabled.
+    langsmith_tracing: bool = Field(False, description="Enable LangSmith tracing")
+    langsmith_api_key: Optional[SecretStr] = Field(None, description="LangSmith API key")
+    langsmith_endpoint: str = Field("https://api.smith.langchain.com", description="LangSmith endpoint")
+    langsmith_project: str = Field("TripPlannerAgent", description="LangSmith project name")
 
     # --- Tool hardening & freshness (WIN 5) ---
     # Volatile data (prices/availability) gets a short TTL; slow-moving data a long

@@ -21,6 +21,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 from compute import compute_budget
+from observability import configure_tracing
 from prompts import TRIP_PLANNER_SYSTEM_PROMPT, TRIP_SYNTHESIS_PROMPT
 from schema import Budget, BudgetItem, ItineraryDraft, finalize_itinerary
 from settings import get_settings
@@ -197,6 +198,7 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     if checkpointer is None:
         checkpointer = get_checkpointer()
 
+    configure_tracing()  # enable LangSmith tracing if configured (near-no-op when off)
     llm_with_tools = get_llm().bind_tools(ALL_TOOLS)
 
     graph = StateGraph(ChatState)

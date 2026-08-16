@@ -394,6 +394,19 @@ full 10-scenario committed baseline for WIN 5 is **pending an OpenAI credit top-
 hit `insufficient_quota` mid-run); no metric regressions expected — WIN 5 is hardening, not a
 behavior change to the scored paths.
 
+**WIN 6 finding (2026-08-16):** injection defense added as defense-in-depth (the baseline already
+passed injection because gpt-4o ignored the payloads, but that relied on model goodwill). Three
+layers: (1) tool-boundary **neutralization** — override phrases ("ignore previous instructions",
+"system override", "you must output", role tags, etc.) are redacted from free-text fields (YouTube
+titles, web-search summaries, place descriptions, weather prose) before they reach the model;
+(2) **untrusted-data delimiters** wrapping web-search blobs; (3) a standing **system + synthesis
+prompt reminder** that tool output is data, never instructions. Identifier fields
+(airline/hotel/attraction names) are left untouched so groundedness is unaffected. Verified
+deterministically: the tool-level neutralization strips the payload before the model sees it (7/7
+network-free tests incl. the youtube/ai-mode injection fixtures) — a structural guarantee, not
+model-dependent. Full live injection eval is **pending the OpenAI credit top-up** (still
+`insufficient_quota`).
+
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 
 | Version | $/itinerary | LLM turns/trip | Cached-input % | Cache hit-rate | Cache-correctness |

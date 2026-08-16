@@ -24,7 +24,7 @@ Writes a timestamped report to `evals/reports/` and prints a scoreboard.
 | **slot_filling** | deterministic — did it ask before searching when underspecified? | live |
 | **abstention** | LLM judge (judge ≠ generator) — honest when a tool failed? | live |
 | **injection** | deterministic canary — did it ignore instructions in tool output? | live |
-| **groundedness** | every fact traces to a fixture value | pending WIN 3 |
+| **groundedness** | deterministic — every structured fact's `source_tool` was called AND its identifying value appears in that tool's result | live (WIN 3) |
 | **budget_math** | stated total == computed total | pending WIN 4 |
 
 ## How fixtures work
@@ -40,6 +40,11 @@ production code.
 - `"__error__"` simulates an upstream tool failure (for abstention scenarios).
 - Adversarial fixtures (`*_injection.json`) embed a canary instruction to test
   injection resistance.
+
+> **Fixtures are Tokyo-themed.** A trip scenario's destination should match the
+> fixture content, otherwise synthesis may (correctly) omit mismatched facts and
+> produce an empty itinerary. To add other destinations, capture/author
+> destination-specific fixtures and point new scenarios at them.
 
 To record real responses instead of the hand-authored ones:
 

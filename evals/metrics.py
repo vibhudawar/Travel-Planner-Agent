@@ -136,9 +136,65 @@ def budget_math(traj: Trajectory) -> dict:
     return {"passed": None, "status": "pending WIN 4 (deterministic compute)"}
 
 
-def groundedness(traj: Trajectory) -> dict:
-    """Scaffold: fact-level groundedness becomes computable in WIN 3."""
-    return {"passed": None, "status": "pending WIN 3 (structured source-bound output)"}
+def _tool_content_index(traj: Trajectory) -> dict:
+    """Map tool name -> concatenated result content actually returned this run."""
+    idx: dict = {}
+    for tr in traj.tool_results:
+        name = tr.get("name", "")
+        idx[name] = idx.get(name, "") + " " + (tr.get("content") or "")
+    return idx
+
+
+def groundedness(itinerary: Optional[dict], traj: Trajectory) -> dict:
+    """Fraction of itinerary facts traceable to the tool result they cite (WIN 3).
+
+    A fact is grounded when: (a) its ``source_tool`` was actually called, and
+    (b) its identifying value (airline / hotel name / activity name) appears in
+    that tool's raw result. Ungameable — no LLM. Passes at >= 0.95. Value-level
+    verification of *every* field is WIN 7's job; this catches provenance
+    hallucination and fabricated names.
+    """
+    if not itinerary:
+        return {"passed": None, "score": None, "status": "no structured itinerary produced"}
+
+    content_by_tool = _tool_content_index(traj)
+
+    # Only source-bound fact lists are scored. Day-plan prose (``days``) and
+    # ``tips`` are itinerary arrangement/advice, not facts, and are excluded.
+    facts = []  # (kind, identifying_value, source_tool)
+    for f in itinerary.get("flights", []):
+        facts.append(("flight", str(f.get("airline") or ""), f.get("source_tool")))
+    for h in itinerary.get("hotels", []):
+        facts.append(("hotel", str(h.get("name") or ""), h.get("source_tool")))
+    for w in itinerary.get("weather", []):
+        facts.append(("weather", "", w.get("source_tool")))
+    for a in itinerary.get("attractions", []):
+        facts.append(("attraction", str(a.get("name") or ""), a.get("source_tool")))
+
+    total = 0
+    grounded = 0
+    ungrounded = []
+    for kind, value, src in facts:
+        total += 1
+        called = src in content_by_tool
+        content = content_by_tool.get(src, "").lower()
+        value_ok = (value.strip() == "") or (value.lower() in content)
+        if called and value_ok:
+            grounded += 1
+        else:
+            ungrounded.append(
+                {"kind": kind, "value": value, "source_tool": src, "called": called, "value_in_result": value_ok}
+            )
+
+    score = grounded / total if total else None
+    return {
+        # No source-bound facts to score -> excluded (None), not a failure.
+        "passed": None if score is None else (score >= 0.95),
+        "score": round(score, 3) if score is not None else None,
+        "n_facts": total,
+        "grounded": grounded,
+        "ungrounded": ungrounded[:10],
+    }
 
 
 def aggregate(passes: List[Optional[bool]]) -> dict:

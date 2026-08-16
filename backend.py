@@ -11,16 +11,17 @@ import logging
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, TypedDict
+from typing import Annotated, Optional, TypedDict
 
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import START, StateGraph
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 
-from prompts import TRIP_PLANNER_SYSTEM_PROMPT
+from prompts import TRIP_PLANNER_SYSTEM_PROMPT, TRIP_SYNTHESIS_PROMPT
+from schema import ItineraryDraft, finalize_itinerary
 from settings import get_settings
 from tools import ALL_TOOLS
 
@@ -32,6 +33,9 @@ logger = logging.getLogger(__name__)
 # -------------------
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
+    # Structured, source-bound itinerary produced by the synthesize node once the
+    # trip data has been gathered. None during the conversational/clarifying phase.
+    itinerary: Optional[dict]
 
 
 # -------------------
@@ -56,6 +60,12 @@ def get_llm() -> ChatOpenAI:
 
 
 @lru_cache(maxsize=1)
+def _get_structurer():
+    """LLM bound to structured itinerary output (no tools). Built once."""
+    return get_llm().with_structured_output(ItineraryDraft)
+
+
+@lru_cache(maxsize=1)
 def get_checkpointer() -> SqliteSaver:
     """Lazily open the SQLite checkpointer connection (opened once, then reused)."""
     settings = get_settings()
@@ -74,6 +84,40 @@ def _chat_node(state: ChatState, llm_with_tools) -> dict:
     return {"messages": [llm_with_tools.invoke(messages)]}
 
 
+def _synthesize_node(state: ChatState) -> dict:
+    """Turn the gathered conversation into a structured, source-bound itinerary.
+
+    Degrades gracefully: if structured synthesis fails, the free-text answer from
+    chat_node still stands and ``itinerary`` is left unset.
+    """
+    messages = state["messages"]
+    called_tools = [m.name for m in messages if isinstance(m, ToolMessage) and getattr(m, "name", None)]
+    try:
+        draft: ItineraryDraft = _get_structurer().invoke(
+            [SystemMessage(content=TRIP_SYNTHESIS_PROMPT)] + messages
+        )
+        itinerary = finalize_itinerary(draft, called_tools)
+        return {"itinerary": itinerary.model_dump(mode="json")}
+    except Exception as exc:  # noqa: BLE001 - never crash the chat on synthesis failure
+        logger.warning("Itinerary synthesis failed: %s: %s", type(exc).__name__, exc)
+        return {"itinerary": None}
+
+
+def _route_after_chat(state: ChatState) -> str:
+    """Route the ReAct loop.
+
+    - pending tool calls -> run the tools
+    - no tool calls but tools were already used -> synthesize the itinerary
+    - no tool calls and no tools used yet -> a clarifying question; end the turn
+    """
+    last = state["messages"][-1]
+    if getattr(last, "tool_calls", None):
+        return "tools"
+    if any(isinstance(m, ToolMessage) for m in state["messages"]):
+        return "synthesize"
+    return END
+
+
 def build_graph(checkpointer: SqliteSaver | None = None):
     """Build and compile the agent graph.
 
@@ -88,10 +132,16 @@ def build_graph(checkpointer: SqliteSaver | None = None):
     graph = StateGraph(ChatState)
     graph.add_node("chat_node", lambda state: _chat_node(state, llm_with_tools))
     graph.add_node("tools", ToolNode(ALL_TOOLS))
+    graph.add_node("synthesize", _synthesize_node)
 
     graph.add_edge(START, "chat_node")
-    graph.add_conditional_edges("chat_node", tools_condition)
+    graph.add_conditional_edges(
+        "chat_node",
+        _route_after_chat,
+        {"tools": "tools", "synthesize": "synthesize", END: END},
+    )
     graph.add_edge("tools", "chat_node")  # loop back after tool execution
+    graph.add_edge("synthesize", END)
 
     return graph.compile(checkpointer=checkpointer)
 

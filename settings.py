@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from pydantic import Field, SecretStr, ValidationError
+from pydantic import AliasChoices, Field, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Anchor paths to the project root (this file's directory) so config, the cache
@@ -39,7 +39,15 @@ class Settings(BaseSettings):
     # --- LLM configuration (pinned for reproducibility; override via env) ---
     # Pinned so evals measure a fixed target. Change OPENAI_MODEL in the env to
     # swap models rather than editing code.
-    openai_model: str = Field("gpt-4o", description="Pinned chat model id")
+    # Reads OPENAI_DEFAULT_MODEL (the name used in .env) or OPENAI_MODEL.
+    openai_model: str = Field(
+        "gpt-4o",
+        validation_alias=AliasChoices("OPENAI_DEFAULT_MODEL", "OPENAI_MODEL"),
+        description="Pinned chat model id (tool-calling / reasoning)",
+    )
+    # Model for structured synthesis. Defaults to the main model; set SYNTHESIS_MODEL
+    # only if you want to tier synthesis to a different model than the agent.
+    synthesis_model: Optional[str] = Field(None, description="Model for structured itinerary synthesis (defaults to openai_model)")
     # Eval judge model — intentionally different from openai_model so the generator
     # never grades its own output (judge ≠ generator). Override via JUDGE_MODEL.
     judge_model: str = Field("gpt-4o-mini", description="Model used by eval LLM judges and the WIN 7 verifier")
@@ -49,7 +57,10 @@ class Settings(BaseSettings):
     # stronger judge_model) when you want semantic checks the value check can't make.
     enable_llm_verifier: bool = Field(False, description="Run the advisory second-model verifier pass")
     temperature: float = Field(0.0, ge=0.0, le=2.0, description="Sampling temperature; 0 = most reproducible")
-    max_tokens: int = Field(1500, gt=0, description="Max output tokens per LLM call")
+    max_tokens: int = Field(1500, gt=0, description="Max output tokens for the chat/answer model")
+    # Structured itineraries (esp. multi-day/family trips) need more room; too low
+    # truncates the JSON mid-output and synthesis fails (LengthFinishReasonError).
+    synthesis_max_tokens: int = Field(4000, gt=0, description="Max output tokens for structured synthesis")
     request_timeout: float = Field(60.0, gt=0, description="Per-request LLM timeout (seconds)")
     max_retries: int = Field(2, ge=0, description="LLM client retry count on transient errors")
 
@@ -86,6 +97,11 @@ class Settings(BaseSettings):
         description="LangGraph SqliteSaver database path",
     )
 
+
+    @property
+    def effective_synthesis_model(self) -> str:
+        """The synthesis model, defaulting to the main model when unset."""
+        return self.synthesis_model or self.openai_model
 
     def resolved_cache_dir(self) -> str:
         """cache_dir as an absolute path (relative values anchored to project root)."""

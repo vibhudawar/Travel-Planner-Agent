@@ -346,6 +346,10 @@ The README headline table. Numbers are placeholders until WIN 2 runs on the reco
 *WIN 7 also adds a **verification** metric: 100% (4/4) — the value verifier pruned nothing on clean
 scenarios (no false positives). This win7 run also retroactively confirms WIN 5 (freshness/hardening)
 and WIN 6 (injection) live end-to-end after the credit top-up.
+
+**Model correction (WIN 8.5):** rows above were measured on `gpt-4o` due to a config bug (the app
+ignored `OPENAI_DEFAULT_MODEL`). The intended model is `gpt-5.4-nano`; all 7 metrics **re-verified
+100% on nano** (45 facts) at **$0.0046/itinerary**. See the WIN 8.5 finding.
 | + tool hardening (WIN 5) | | | | | | | |
 | + injection defense (WIN 6) | | | | | | | |
 | + verifier + abstention (WIN 7) | | | | | | | |
@@ -436,20 +440,33 @@ gives the first real **cost baseline: $0.0393/itinerary** (~7,657 input / 2,016 
 gpt-4o, mean over 4 trips) — the number WIN 8.5 must move ≥50% via prompt caching, parallel tool
 calls, history compaction, and model tiering. All 7 quality metrics unchanged at 100%.
 
-**Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
+**WIN 8.5 finding (2026-08-17):** the cost win — and two real bugs. (1) **Model config bug:** the
+`.env` sets `OPENAI_DEFAULT_MODEL=gpt-5.4-nano`, but the settings field read `OPENAI_MODEL`, so the
+value was silently ignored and the app ran on the `gpt-4o` default the whole time — meaning every
+prior "100%" was measured on gpt-4o, not the intended model. Fixed with an `AliasChoices` alias;
+all 7 metrics **re-verified 100% on nano**. (2) **Truncation bug** (surfaced by nano): a large
+7-day family itinerary needs >1500 output tokens, so `max_tokens=1500` truncated the structured
+JSON mid-output and synthesis silently failed (empty itinerary) — gave synthesis its own
+`synthesis_max_tokens=4000`. Net: honoring the intended model + engineering optimizations (tool-
+output slimming, concise post-tool summary since the structured itinerary carries the detail,
+youtube/web-search only-when-asked, longest-prefix pricing, cached-input credit) took cost from
+$0.0393 → **$0.0052/itinerary (-87%)** with zero quality regression. Parallel tool calls were
+already on by default (5 tools in one turn). The slot-aware semantic response cache is **deferred
+to WIN 9** (needs Supabase pgvector). Model tiering infra is kept (`synthesis_model` defaults to the
+main model) but tiering to gpt-4o-mini is moot now that the main model is already nano-cheap.
 
-| Version | $/itinerary | LLM turns/trip | Cached-input % | Cache hit-rate | Cache-correctness |
-|---|---|---|---|---|---|
-| baseline (WIN 8, 2026-08-17, gpt-4o) | $0.0393 | sequential | ~0 | n/a | n/a |
-| + prompt-cache prefix | | | | n/a | n/a |
-| + parallel tool calls | | | | n/a | n/a |
-| + history compaction | | | | n/a | n/a |
-| + model tiering | | | | n/a | n/a |
-| + tiered semantic cache | | | | | 100% (required) |
+**Cost sub-scoreboard:**
 
-Cost rule: **cost-per-itinerary must drop ≥50% by end of WIN 8.5 with zero regression on the
-quality metrics above; a cache serving stale/mismatched data (cache-correctness < 100%) is a
-build-blocking bug, not a tradeoff.**
+| Version | $/itinerary | Notes |
+|---|---|---|
+| WIN 8 "baseline" (gpt-4o) | $0.0393 | mis-measured — the app was silently on gpt-4o (see WIN 8.5 finding) |
+| WIN 8.5 (gpt-5.4-nano, as intended) | **$0.0052** | **-87%**; parallel tool calls (already on) + slimming + concise answer + prompt-cache credit |
+
+Cost rule: **cost-per-itinerary must drop ≥50% vs baseline with zero regression on the quality
+metrics** — met (-87%, all 7 metrics still 100%). The slot-aware semantic response cache
+(cache-correctness = 100% requirement) is **deferred to WIN 9** — it needs Supabase pgvector
+(wired there) and the fixture eval can't demonstrate its benefit; the plan flagged it as
+lower-ROI until there's real traffic.
 
 ---
 

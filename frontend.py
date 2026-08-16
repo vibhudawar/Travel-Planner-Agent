@@ -1,7 +1,11 @@
 import streamlit as st
-from backend import chatbot, retrieve_all_threads
+from backend import get_chatbot, retrieve_all_threads
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 import uuid
+
+# Build the compiled agent once (cached). Fails fast with a clear message if
+# required configuration is missing.
+chatbot = get_chatbot()
 
 
 # ====================== Page Configuration ======================

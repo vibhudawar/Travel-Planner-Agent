@@ -3,3 +3,7 @@
 __pycache__
 cache
 *.db
+*.db-shm
+*.db-wal
+data/
+.DS_Store

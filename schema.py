@@ -128,6 +128,8 @@ class Itinerary(ItineraryDraft):
 
     provenance: List[Source] = Field(default_factory=list)
     generated_at: Optional[datetime] = None
+    # WIN 7 verification report (facts removed, disclaimers, verifier notes).
+    verification: Optional[dict] = None
 
 
 def finalize_itinerary(draft: ItineraryDraft, called_tools: List[str]) -> Itinerary:

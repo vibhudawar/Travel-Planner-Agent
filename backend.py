@@ -31,9 +31,6 @@ from verifier import verify_itinerary
 logger = logging.getLogger(__name__)
 
 
-# -------------------
-# State
-# -------------------
 class ChatState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     # Structured, source-bound itinerary produced by the synthesize node once the
@@ -41,9 +38,6 @@ class ChatState(TypedDict):
     itinerary: Optional[dict]
 
 
-# -------------------
-# Factories
-# -------------------
 def get_llm() -> ChatOpenAI:
     """Construct the pinned chat model from validated settings."""
     settings = get_settings()
@@ -237,9 +231,6 @@ def get_chatbot():
     return build_graph()
 
 
-# -------------------
-# Helper
-# -------------------
 def retrieve_all_threads() -> list:
     """List all conversation thread ids recorded by the checkpointer."""
     all_threads = set()

@@ -31,8 +31,6 @@ def get_cache() -> diskcache.Cache:
     return diskcache.Cache(get_settings().resolved_cache_dir())
 
 
-# ====================== Freshness & validation helpers (WIN 5) ==============
-
 def _now_iso() -> str:
     """Current UTC timestamp (ISO-8601), for stamping tool results."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -65,7 +63,7 @@ def _validate_serpapi(result: Any) -> Optional[str]:
     return None
 
 
-# ====================== Prompt-injection defense (WIN 6) =====================
+# Prompt-injection defense (WIN 6).
 # Tools pull text from the public internet (web/AI-mode search, YouTube titles,
 # place descriptions). That content is DATA, never instructions. Defense in depth:
 # (1) neutralize the most common override phrases, (2) wrap free-text blobs in
@@ -102,33 +100,6 @@ def _wrap_untrusted(text: str, source: str) -> str:
         f"{_neutralize_injection(text)}\n"
         f"<<END UNTRUSTED {source} CONTENT>>"
     )
-
-# ====================== Utility Tools ======================
-
-@tool
-def calculator(first_num: float, second_num: float, operation: str) -> dict:
-    """
-    Perform a basic arithmetic operation on two numbers.
-    Supported operations: add, sub, mul, div
-    """
-    try:
-        if operation == "add":
-            result = first_num + second_num
-        elif operation == "sub":
-            result = first_num - second_num
-        elif operation == "mul":
-            result = first_num * second_num
-        elif operation == "div":
-            if second_num == 0:
-                return {"error": "Division by zero is not allowed"}
-            result = first_num / second_num
-        else:
-            return {"error": f"Unsupported operation '{operation}'"}
-        
-        return {"first_num": first_num, "second_num": second_num, "operation": operation, "result": result}
-    except Exception as e:
-        return {"error": str(e)}
-
 
 @tool
 def google_search(query: str) -> dict:
@@ -180,8 +151,6 @@ def google_search(query: str) -> dict:
     response["retrieved_at"] = _now_iso()
     return response
 
-
-# ====================== Caching Utilities ======================
 
 def get_cached(key: str) -> Optional[Any]:
     """Get cached value by key"""
@@ -248,8 +217,6 @@ def _serpapi_search(
     logger.info(f"SerpAPI search completed: {cache_key_prefix}")
     return result
 
-
-# ====================== Travel Tools ======================
 
 @tool
 def search_flights(
@@ -587,7 +554,6 @@ def search_youtube_vlogs(query: str, max_results: int = 5) -> dict:
     return {"videos": videos, "count": len(videos), "retrieved_at": _now_iso()}
 
 
-# Export all tools as a list
 ALL_TOOLS = [
     search_flights,
     search_hotels,
@@ -595,5 +561,4 @@ ALL_TOOLS = [
     search_attractions,
     search_youtube_vlogs,
     google_search,
-    calculator
 ]

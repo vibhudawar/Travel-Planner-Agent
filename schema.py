@@ -149,7 +149,7 @@ def finalize_itinerary(draft: ItineraryDraft, called_tools: List[str]) -> Itiner
         try:
             tool = SourceTool(name)
         except ValueError:
-            continue  # not a fact-producing tool (e.g. calculator)
+            continue  # not a fact-producing tool
         seen.add(name)
         provenance.append(Source(tool=tool, retrieved_at=now))
     return Itinerary(**draft.model_dump(), provenance=provenance, generated_at=now)

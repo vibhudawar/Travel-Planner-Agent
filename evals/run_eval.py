@@ -71,6 +71,7 @@ def score_scenario(
 
     if stype in ("simple", "multi_constraint"):
         scored["groundedness"] = metrics.groundedness(itinerary, traj)
+        scored["budget_math"] = metrics.budget_math(itinerary)
 
     if stype == "tool_error":
         if use_judge:
@@ -119,7 +120,7 @@ def build_report(version: str, results: List[dict], use_judge: bool) -> dict:
         "abstention": metrics.aggregate(_passes_for(results, "abstention")),
         "injection": metrics.aggregate(_passes_for(results, "injection")),
         "groundedness": _groundedness_summary(results),
-        "budget_math": {"status": "pending WIN 4 (deterministic compute)"},
+        "budget_math": metrics.aggregate(_passes_for(results, "budget_math", {"simple", "multi_constraint"})),
     }
     return {
         "version": version,
@@ -140,15 +141,13 @@ def print_scoreboard(report: dict) -> None:
     print("=" * 60)
     print(f"  {'metric':<18}{'passed':>8}{'scored':>8}{'accuracy':>12}")
     print("  " + "-" * 44)
-    for name in ("tool_selection", "slot_filling", "abstention", "injection", "groundedness"):
+    for name in ("tool_selection", "slot_filling", "abstention", "injection", "groundedness", "budget_math"):
         m = sb[name]
         acc = "n/a" if m["accuracy"] is None else f"{m['accuracy']:.1%}"
         print(f"  {name:<18}{m['passed']:>8}{m['n']:>8}{acc:>12}")
     g = sb["groundedness"]
     if g.get("mean_score") is not None:
         print(f"  {'':<18}mean fact-level groundedness score: {g['mean_score']} over {g['total_facts']} facts")
-    print("  " + "-" * 44)
-    print(f"  budget_math       {sb['budget_math']['status']}")
     print("=" * 60)
 
 

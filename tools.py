@@ -2,16 +2,15 @@
 Trip Planner Tools
 All tool functions with @tool decorator for dynamic LLM tool selection
 """
-import os
 import logging
+from functools import lru_cache
 from typing import Dict, Any, Optional
 import requests
 import diskcache
 from serpapi import GoogleSearch
 from langchain_core.tools import tool
-from dotenv import load_dotenv
 
-load_dotenv()
+from settings import get_settings
 
 # Configure logging
 logging.basicConfig(
@@ -20,8 +19,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize cache
-cache = diskcache.Cache(os.getenv("CACHE_DIR", "./cache"))
+
+@lru_cache(maxsize=1)
+def get_cache() -> diskcache.Cache:
+    """Lazily open the diskcache directory (opened once, then reused)."""
+    return diskcache.Cache(get_settings().resolved_cache_dir())
 
 # ====================== Utility Tools ======================
 
@@ -102,12 +104,12 @@ def google_search(query: str) -> dict:
 
 def get_cached(key: str) -> Optional[Any]:
     """Get cached value by key"""
-    return cache.get(key)
+    return get_cache().get(key)
 
 
 def set_cached(key: str, value: Any, expiry_hours: int = 6) -> None:
     """Set cached value with expiry"""
-    cache.set(key, value, expire=expiry_hours * 3600)
+    get_cache().set(key, value, expire=expiry_hours * 3600)
 
 
 def _serpapi_search(params: Dict[str, Any], cache_key_prefix: str = "") -> Dict[str, Any]:
@@ -131,11 +133,7 @@ def _serpapi_search(params: Dict[str, Any], cache_key_prefix: str = "") -> Dict[
 
     # Execute search
     try:
-        api_key = os.getenv("SERPAPI_API_KEY")
-        if not api_key:
-            return {"error": "SERPAPI_API_KEY not found in environment"}
-
-        params["api_key"] = api_key
+        params["api_key"] = get_settings().serpapi_api_key.get_secret_value()
         search = GoogleSearch(params)
         result = search.get_dict()
 
@@ -304,9 +302,7 @@ def search_weather(location: str, start_date: str, end_date: str) -> dict:
     Returns:
         Dictionary with human-readable weather forecast information
     """
-    api_key = os.getenv("OPENWEATHER_API_KEY")
-    if not api_key:
-        return {"error": "OPENWEATHER_API_KEY not found in environment"}
+    api_key = get_settings().openweather_api_key.get_secret_value()
 
     # Create natural language prompt
     prompt = f"What's the weather forecast for {location} from {start_date} to {end_date}?"

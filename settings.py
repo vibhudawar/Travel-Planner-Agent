@@ -126,8 +126,15 @@ class Settings(BaseSettings):
 
     @property
     def checkpointer_dsn(self) -> Optional[str]:
-        """DSN for the LangGraph Postgres checkpointer (prefers direct over pooled)."""
-        url = self.database_url or self.database_pooled_url
+        """DSN for the LangGraph Postgres checkpointer.
+
+        Prefer the pooled URL: Supabase's direct host (db.<ref>.supabase.co) is
+        IPv6-only and won't resolve on IPv4 networks (Render, CI). Use the SESSION
+        pooler (pooler host, port 5432) — it resolves on IPv4 and supports the
+        prepared statements the checkpointer needs (the 6543 transaction pooler
+        does not).
+        """
+        url = self.database_pooled_url or self.database_url
         return url.get_secret_value() if url else None
 
     def require_api_settings(self) -> None:

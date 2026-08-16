@@ -85,6 +85,23 @@ class Settings(BaseSettings):
     # gets seasonal expectations, clearly labelled — never fiction presented as a forecast.
     weather_forecast_horizon_days: int = Field(14, gt=0, description="Max days out a real forecast is trusted")
 
+    # --- API / Supabase (WIN 9) ---
+    # Optional so the eval/tests never require Supabase; the API fails fast at
+    # startup (require_api_settings) if any are missing. Aliases match the .env.
+    supabase_url: Optional[str] = Field(
+        None, validation_alias=AliasChoices("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")
+    )
+    supabase_secret_key: Optional[SecretStr] = Field(
+        None, validation_alias=AliasChoices("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY")
+    )
+    database_pooled_url: Optional[SecretStr] = Field(
+        None, validation_alias=AliasChoices("DATABASE_POOLED_URL")
+    )
+    database_url: Optional[SecretStr] = Field(None, validation_alias=AliasChoices("DATABASE_URL"))
+    cors_allow_origins: str = Field(
+        "http://localhost:3000", description="Comma-separated allowed CORS origins"
+    )
+
     # --- Infrastructure ---
     # Defaults are absolute (anchored to the project root) so they don't depend
     # on the launch directory; override with an absolute path via env if desired.
@@ -102,6 +119,32 @@ class Settings(BaseSettings):
     def effective_synthesis_model(self) -> str:
         """The synthesis model, defaulting to the main model when unset."""
         return self.synthesis_model or self.openai_model
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    @property
+    def checkpointer_dsn(self) -> Optional[str]:
+        """DSN for the LangGraph Postgres checkpointer (prefers direct over pooled)."""
+        url = self.database_url or self.database_pooled_url
+        return url.get_secret_value() if url else None
+
+    def require_api_settings(self) -> None:
+        """Fail fast at API startup if Supabase/DB config is missing (not at import)."""
+        missing = [
+            name
+            for name, val in (
+                ("SUPABASE_URL", self.supabase_url),
+                ("SUPABASE_SECRET_KEY", self.supabase_secret_key),
+                ("DATABASE_POOLED_URL / DATABASE_URL", self.checkpointer_dsn),
+            )
+            if not val
+        ]
+        if missing:
+            raise RuntimeError(
+                "Missing API configuration: " + ", ".join(missing) + ". Set them in the environment."
+            )
 
     def resolved_cache_dir(self) -> str:
         """cache_dir as an absolute path (relative values anchored to project root)."""

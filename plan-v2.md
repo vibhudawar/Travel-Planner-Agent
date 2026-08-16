@@ -340,7 +340,7 @@ The README headline table. Numbers are placeholders until WIN 2 runs on the reco
 |---|---|---|---|---|---|---|---|
 | baseline (2026-08-16, gpt-4o, judge gpt-4o-mini) | 100% (4/4) | 100% (2/2) | pending WIN 3 | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
 | + structured schema (WIN 3) | 100% (4/4) | 100% (2/2) | 100% (4/4; 36 facts, mean 1.0) | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
-| + deterministic compute (WIN 4) | | | | | | | |
+| + deterministic compute (WIN 4) | 100% (4/4) | 100% (2/2) | 100% (4/4; 33 facts, mean 1.0) | 100% (4/4) | 100% (2/2) | 100% (2/2) | — |
 | + tool hardening (WIN 5) | | | | | | | |
 | + injection defense (WIN 6) | | | | | | | |
 | + verifier + abstention (WIN 7) | | | | | | | |
@@ -369,6 +369,16 @@ destination** — reusing Tokyo fixtures for a Paris query made synthesis (corre
 mismatched facts and emit an empty itinerary, which is nondeterministic noise, not a real
 signal. Note: this is *attribution + name-level* groundedness; full value-level verification of
 every field is WIN 7.
+
+**WIN 4 finding (2026-08-16):** the WIN 3 (LLM-authored) budgets were genuinely broken —
+`simple_tokyo_solo` and `tool_error_flights` had **no total at all**, and `multi_budget_tokyo`
+set `total = 2500` (the user's *budget cap*) while its line items summed to 2219. Moving the
+budget into `compute.py` (cheapest flight × travelers + cheapest hotel × nights, USD-normalized,
+from parsed dates) takes **budget-math to 100%** and the total now always equals the sum of its
+parts. Also refined the groundedness value check from exact-substring to distinctive-token
+matching, after the LLM normalized the fixture's `"United"` to `"United Airlines"` and tripped a
+false negative — the metric now tolerates light name normalization while still catching
+fabricated names.
 
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 

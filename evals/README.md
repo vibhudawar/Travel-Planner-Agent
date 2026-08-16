@@ -25,7 +25,7 @@ Writes a timestamped report to `evals/reports/` and prints a scoreboard.
 | **abstention** | LLM judge (judge ≠ generator) — honest when a tool failed? | live |
 | **injection** | deterministic canary — did it ignore instructions in tool output? | live |
 | **groundedness** | deterministic — every structured fact's `source_tool` was called AND its identifying value appears in that tool's result | live (WIN 3) |
-| **budget_math** | stated total == computed total | pending WIN 4 |
+| **budget_math** | deterministic — the budget total equals the sum of its items, single currency, non-negative | live (WIN 4) |
 
 ## How fixtures work
 

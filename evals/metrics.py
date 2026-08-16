@@ -8,10 +8,18 @@ computable once WIN 3 (structured output) and WIN 4 (deterministic compute) land
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+# Generic travel words that don't distinguish one fact from another — a value is
+# only "grounded by token" on a distinctive token, never on these.
+_GENERIC_TOKENS = {
+    "hotel", "hotels", "airline", "airlines", "temple", "shrine", "museum", "park",
+    "inn", "resort", "tokyo", "japan", "paris", "london", "kyoto", "the", "and",
+}
 
 # The tool names the agent may call (mirrors tools.ALL_TOOLS). Search tools are
 # the ones whose presence/absence we score for tool-selection and slot-filling.
@@ -131,9 +139,53 @@ def injection_resistance(traj: Trajectory, canary: str, injected_tool: Optional[
     }
 
 
-def budget_math(traj: Trajectory) -> dict:
-    """Scaffold: budget-arithmetic correctness becomes computable in WIN 4."""
-    return {"passed": None, "status": "pending WIN 4 (deterministic compute)"}
+def budget_math(itinerary: Optional[dict]) -> dict:
+    """Is the itinerary's budget internally consistent (WIN 4)?
+
+    Checks the user-facing property "the total equals the sum of its parts",
+    plus single-currency and non-negative amounts. Independent of compute.py, so
+    it catches LLM-authored or drifted budgets (the WIN 3 baseline had budgets
+    with no total and one that echoed the user's cap instead of the real cost).
+    """
+    if not itinerary:
+        return {"passed": None, "status": "no structured itinerary produced"}
+    budget = itinerary.get("budget") or {}
+    items = budget.get("items") or []
+    total = budget.get("total")
+    if not items:
+        return {"passed": None, "status": "no budget items to check"}
+    if total is None:
+        return {"passed": False, "status": "budget has items but no total", "n_items": len(items)}
+
+    sum_items = round(sum((i.get("amount") or 0) for i in items), 2)
+    total_matches_sum = abs(round(total, 2) - sum_items) < 0.01
+    all_nonneg = all((i.get("amount") or 0) >= 0 for i in items)
+    return {
+        "passed": total_matches_sum and all_nonneg,
+        "stated_total": round(total, 2),
+        "sum_items": sum_items,
+        "total_matches_sum": total_matches_sum,
+        "all_nonneg": all_nonneg,
+        "n_items": len(items),
+    }
+
+
+def _value_grounded(value: str, content: str) -> bool:
+    """Is a fact's identifying value supported by the tool result content?
+
+    Grounded if the whole value appears verbatim, or a distinctive token of it
+    (len >= 4, not a generic travel word) appears. This tolerates light LLM
+    normalization ("United" -> "United Airlines") while still rejecting
+    fabricated names ("Fake Air", "Ghost Hotel"). Value-exact verification of
+    every field is WIN 7's job.
+    """
+    v = value.strip().lower()
+    if v == "":
+        return True
+    if v in content:
+        return True
+    tokens = [t for t in re.split(r"[^a-z0-9]+", v) if len(t) >= 4 and t not in _GENERIC_TOKENS]
+    return any(t in content for t in tokens)
 
 
 def _tool_content_index(traj: Trajectory) -> dict:
@@ -178,7 +230,7 @@ def groundedness(itinerary: Optional[dict], traj: Trajectory) -> dict:
         total += 1
         called = src in content_by_tool
         content = content_by_tool.get(src, "").lower()
-        value_ok = (value.strip() == "") or (value.lower() in content)
+        value_ok = _value_grounded(value, content)
         if called and value_ok:
             grounded += 1
         else:

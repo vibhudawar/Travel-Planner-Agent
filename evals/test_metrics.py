@@ -15,6 +15,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage  # noqa: E402
 
+import compute  # noqa: E402
 from evals import metrics  # noqa: E402
 from evals.fixture_backend import fixtures_active  # noqa: E402
 
@@ -126,6 +127,21 @@ def test_groundedness_flags_fabricated_and_misattributed():
     assert r["score"] == 0.0 and r["passed"] is False and len(r["ungrounded"]) == 3
 
 
+def test_groundedness_tolerates_name_normalization():
+    # Fixture says "United"; the LLM writes "United Airlines" — still grounded.
+    msgs = [
+        HumanMessage(content="x"),
+        _ai_tool_call("search_flights"),
+        ToolMessage(content="{'flights': [{'airline': 'United, United'}]}", name="search_flights", tool_call_id="1"),
+        AIMessage(content="done"),
+    ]
+    traj = metrics.extract_trajectory(msgs)
+    grounded = metrics.groundedness({"flights": [{"airline": "United Airlines", "source_tool": "search_flights"}]}, traj)
+    assert grounded["passed"] is True and grounded["score"] == 1.0
+    fabricated = metrics.groundedness({"flights": [{"airline": "Fake Air", "source_tool": "search_flights"}]}, traj)
+    assert fabricated["passed"] is False and fabricated["score"] == 0.0
+
+
 def test_groundedness_no_itinerary():
     r = metrics.groundedness(None, metrics.extract_trajectory([HumanMessage(content="x")]))
     assert r["passed"] is None and r["score"] is None
@@ -169,6 +185,62 @@ def test_fixture_injection_content_present_in_tool_output():
     # The malicious canary reaches the tool output (untrusted data) — WIN 6 will
     # defend against it; here we just confirm the adversarial fixture is wired.
     assert "INJECTION-CANARY-7F3Q" in out["videos"][0]["title"]
+
+
+# --- deterministic compute (WIN 4) -------------------------------------------
+def test_trip_nights():
+    assert compute.trip_nights("2026-09-10", "2026-09-15") == 5
+    assert compute.trip_nights("2026-09-10", "2026-09-10") is None  # zero nights
+    assert compute.trip_nights(None, "2026-09-15") is None
+    assert compute.trip_nights("bad", "2026-09-15") is None
+
+
+def test_compute_budget_cheapest_and_math():
+    itin = {
+        "start_date": "2026-09-10",
+        "end_date": "2026-09-15",  # 5 nights
+        "travelers": 2,
+        "flights": [{"airline": "ANA", "price": 812}, {"airline": "JAL", "price": 905}],
+        "hotels": [{"name": "Cheap Inn", "price_per_night": 100}, {"name": "Pricey", "price_per_night": 200}],
+    }
+    b = compute.compute_budget(itin)
+    # cheapest flight 812 x 2 travelers + cheapest hotel 100 x 5 nights
+    assert b["total"] == round(812 * 2 + 100 * 5, 2)
+    assert b["total"] == round(sum(i["amount"] for i in b["items"]), 2)
+    assert b["nights"] == 5 and b["travelers"] == 2 and b["mixed_currency"] is False
+
+
+def test_compute_budget_flags_unknown_currency():
+    itin = {"start_date": "2026-09-10", "end_date": "2026-09-12", "travelers": 1,
+            "flights": [{"airline": "X", "price": 500, "currency": "XYZ"}], "hotels": []}
+    b = compute.compute_budget(itin)
+    assert b["mixed_currency"] is True and b["items"] == []
+
+
+# --- budget_math metric (WIN 4) ----------------------------------------------
+def test_budget_math_consistent():
+    itin = {"budget": {"currency": "USD", "total": 1624.0,
+                       "items": [{"label": "Flights", "amount": 1624.0}]}}
+    r = metrics.budget_math(itin)
+    assert r["passed"] is True and r["total_matches_sum"] is True
+
+
+def test_budget_math_total_mismatch_fails():
+    # LLM echoed the user's cap (2500) but items sum to 2219 — the real WIN 3 bug.
+    itin = {"budget": {"currency": "USD", "total": 2500.0,
+                       "items": [{"label": "Flights", "amount": 1624.0}, {"label": "Hotel", "amount": 595.0}]}}
+    r = metrics.budget_math(itin)
+    assert r["passed"] is False and r["sum_items"] == 2219.0
+
+
+def test_budget_math_missing_total_fails():
+    itin = {"budget": {"items": [{"label": "Flights", "amount": 500.0}]}}
+    assert metrics.budget_math(itin)["passed"] is False
+
+
+def test_budget_math_no_items_excluded():
+    assert metrics.budget_math({"budget": {"items": []}})["passed"] is None
+    assert metrics.budget_math(None)["passed"] is None
 
 
 def _run_all():

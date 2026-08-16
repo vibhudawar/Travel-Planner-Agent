@@ -20,8 +20,9 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+from compute import compute_budget
 from prompts import TRIP_PLANNER_SYSTEM_PROMPT, TRIP_SYNTHESIS_PROMPT
-from schema import ItineraryDraft, finalize_itinerary
+from schema import Budget, BudgetItem, ItineraryDraft, finalize_itinerary
 from settings import get_settings
 from tools import ALL_TOOLS
 
@@ -97,6 +98,17 @@ def _synthesize_node(state: ChatState) -> dict:
             [SystemMessage(content=TRIP_SYNTHESIS_PROMPT)] + messages
         )
         itinerary = finalize_itinerary(draft, called_tools)
+        # Deterministic budget: overwrite the model's proposed budget with one
+        # computed in code from the source-bound facts + real dates (WIN 4), so
+        # the total always adds up and is grounded rather than LLM-guessed.
+        computed = compute_budget(itinerary.model_dump(mode="python"), itinerary.travelers)
+        itinerary.budget = Budget(
+            currency=computed["currency"],
+            items=[BudgetItem(**item) for item in computed["items"]],
+            total=computed["total"],
+        )
+        if computed["mixed_currency"]:
+            logger.warning("Itinerary has facts in an unrecognized currency; budget may be incomplete.")
         return {"itinerary": itinerary.model_dump(mode="json")}
     except Exception as exc:  # noqa: BLE001 - never crash the chat on synthesis failure
         logger.warning("Itinerary synthesis failed: %s: %s", type(exc).__name__, exc)

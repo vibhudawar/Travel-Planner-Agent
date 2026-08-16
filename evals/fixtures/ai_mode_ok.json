@@ -1,0 +1,16 @@
+{
+  "text_blocks": [
+    { "type": "heading", "snippet": "Best time to visit Tokyo" },
+    {
+      "type": "paragraph",
+      "snippet": "Spring (late March to April) and autumn (October to November) offer mild weather and beautiful scenery."
+    },
+    {
+      "type": "list",
+      "list": [
+        { "snippet": "Cherry blossoms usually peak in early April." },
+        { "snippet": "Autumn foliage peaks in mid-to-late November." }
+      ]
+    }
+  ]
+}

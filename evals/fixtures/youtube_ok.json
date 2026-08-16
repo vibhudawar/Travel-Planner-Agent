@@ -1,0 +1,22 @@
+{
+  "video_results": [
+    {
+      "title": "TOKYO Travel Guide 2026 - 5 Day Itinerary",
+      "channel": { "name": "Wander Japan" },
+      "views": 1200000,
+      "published_date": "6 months ago",
+      "length": "18:32",
+      "link": "https://youtube.com/watch?v=abc123",
+      "thumbnail": { "static": "https://img.example.com/abc.jpg" }
+    },
+    {
+      "title": "10 Things to Know Before Visiting Tokyo",
+      "channel": { "name": "Abroad in Japan" },
+      "views": 2500000,
+      "published_date": "1 year ago",
+      "length": "14:05",
+      "link": "https://youtube.com/watch?v=def456",
+      "thumbnail": { "static": "https://img.example.com/def.jpg" }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "properties": [
+    {
+      "name": "Shinjuku Granbell Hotel",
+      "rate_per_night": { "extracted_lowest": 142 },
+      "overall_rating": 4.4,
+      "reviews": 3820,
+      "amenities": ["Free Wi-Fi", "Restaurant", "Bar", "Air conditioning", "Spa"],
+      "link": "https://example.com/granbell",
+      "description": "Modern hotel in the heart of Shinjuku, walking distance to nightlife and transit."
+    },
+    {
+      "name": "Tokyu Stay Ginza",
+      "rate_per_night": { "extracted_lowest": 168 },
+      "overall_rating": 4.5,
+      "reviews": 2110,
+      "amenities": ["Free Wi-Fi", "Laundry", "Kitchenette"],
+      "link": "https://example.com/tokyustay",
+      "description": "Comfortable rooms near Ginza shopping and Tsukiji outer market."
+    },
+    {
+      "name": "Asakusa View Hotel",
+      "rate_per_night": { "extracted_lowest": 119 },
+      "overall_rating": 4.2,
+      "reviews": 5010,
+      "amenities": ["Free Wi-Fi", "Restaurant", "River view"],
+      "link": "https://example.com/asakusaview",
+      "description": "Budget-friendly hotel near Senso-ji Temple with skyline views."
+    }
+  ]
+}

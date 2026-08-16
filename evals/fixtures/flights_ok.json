@@ -1,0 +1,47 @@
+{
+  "best_flights": [
+    {
+      "price": 812,
+      "total_duration": 845,
+      "booking_token": "tok_ana_812",
+      "flights": [
+        {
+          "airline": "ANA",
+          "departure_airport": { "time": "2026-09-10 11:05" },
+          "arrival_airport": { "time": "2026-09-11 15:10" }
+        }
+      ]
+    },
+    {
+      "price": 905,
+      "total_duration": 910,
+      "booking_token": "tok_jal_905",
+      "flights": [
+        {
+          "airline": "Japan Airlines",
+          "departure_airport": { "time": "2026-09-10 13:40" },
+          "arrival_airport": { "time": "2026-09-11 17:25" }
+        }
+      ]
+    }
+  ],
+  "other_flights": [
+    {
+      "price": 1150,
+      "total_duration": 1200,
+      "booking_token": "tok_ua_1150",
+      "flights": [
+        {
+          "airline": "United",
+          "departure_airport": { "time": "2026-09-10 06:30" },
+          "arrival_airport": { "time": "2026-09-10 09:15" }
+        },
+        {
+          "airline": "United",
+          "departure_airport": { "time": "2026-09-10 11:00" },
+          "arrival_airport": { "time": "2026-09-11 13:00" }
+        }
+      ]
+    }
+  ]
+}

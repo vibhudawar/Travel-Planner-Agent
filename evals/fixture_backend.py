@@ -55,7 +55,9 @@ def _load(name: str) -> Dict[str, Any]:
 
 
 # --- Fake network boundaries -------------------------------------------------
-def _fake_serpapi_search(params: Dict[str, Any], cache_key_prefix: str = "") -> Dict[str, Any]:
+def _fake_serpapi_search(
+    params: Dict[str, Any], cache_key_prefix: str = "", ttl_hours=None
+) -> Dict[str, Any]:
     engine = params.get("engine", "")
     name = _active.get(engine)
     if name is None:

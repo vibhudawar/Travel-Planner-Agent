@@ -380,6 +380,20 @@ matching, after the LLM normalized the fixture's `"United"` to `"United Airlines
 false negative — the metric now tolerates light name normalization while still catching
 fabricated names.
 
+**WIN 5 finding (2026-08-16):** tool hardening shipped — stable cache keys (hash of normalized
+params, api_key excluded), SerpAPI/OpenWeather response validation, bounded retries with backoff
+(tenacity), per-category cache TTLs (volatile prices 1h vs. stable data 24h), `retrieved_at`
+freshness stamps on every tool result, and **code-authored weather labelling**: a trip beyond
+the ~14-day forecast horizon is stamped `is_forecast=False` with a "seasonal averages, NOT a
+live forecast" label (never fiction presented as a forecast). Also fixed a latent **over-asking**
+bug surfaced during verification — the agent demanded optional preferences (layovers, amenities)
+on a fully-specified query; the system prompt now proceeds once destination/origin/dates are
+present and defaults the rest. Verified via 24 network-free unit tests + a full end-to-end
+single-scenario smoke (all measurable metrics 100%, weather label correctly stamped). NOTE: the
+full 10-scenario committed baseline for WIN 5 is **pending an OpenAI credit top-up** (the account
+hit `insufficient_quota` mid-run); no metric regressions expected — WIN 5 is hardening, not a
+behavior change to the scored paths.
+
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 
 | Version | $/itinerary | LLM turns/trip | Cached-input % | Cache hit-rate | Cache-correctness |

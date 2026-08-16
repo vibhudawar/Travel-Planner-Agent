@@ -1,0 +1,28 @@
+{
+  "local_results": [
+    {
+      "title": "Senso-ji Temple",
+      "rating": 4.6,
+      "reviews": 52000,
+      "type": "Buddhist temple",
+      "address": "2-3-1 Asakusa, Taito City",
+      "description": "Ancient Buddhist temple with a large lantern gate and shopping street."
+    },
+    {
+      "title": "Meiji Jingu",
+      "rating": 4.6,
+      "reviews": 41000,
+      "type": "Shinto shrine",
+      "address": "1-1 Yoyogikamizonocho, Shibuya City",
+      "description": "Forested shrine dedicated to Emperor Meiji, a calm escape in the city."
+    },
+    {
+      "title": "teamLab Planets TOKYO",
+      "rating": 4.4,
+      "reviews": 38000,
+      "type": "Art museum",
+      "address": "6-1-16 Toyosu, Koto City",
+      "description": "Immersive digital art installations you walk through barefoot."
+    }
+  ]
+}

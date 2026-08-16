@@ -338,7 +338,7 @@ The README headline table. Numbers are placeholders until WIN 2 runs on the reco
 
 | Version | Tool-select acc. | Slot-fill acc. | Groundedness | Budget-math | Abstention acc. | Injection resist. | $/itinerary |
 |---|---|---|---|---|---|---|---|
-| baseline (today) | — | — | — | — | 0 (never abstains) | — | — |
+| baseline (2026-08-16, gpt-4o, judge gpt-4o-mini) | 100% (4/4) | 100% (2/2) | pending WIN 3 | pending WIN 4 | 100% (2/2) | 100% (2/2) | — |
 | + structured schema (WIN 3) | | | | | | | |
 | + deterministic compute (WIN 4) | | | | | | | |
 | + tool hardening (WIN 5) | | | | | | | |
@@ -349,6 +349,15 @@ The README headline table. Numbers are placeholders until WIN 2 runs on the reco
 Rule (RAG carry-over): **a merge that regresses any metric >2% without justification is
 blocked in CI.** Record negative results too — if a change doesn't move a number, that's a
 finding worth committing (RAG's WIN 3 NLU regression is the model here).
+
+**WIN 2 baseline finding (2026-08-16):** on the 10-scenario golden set the current gpt-4o
+agent already passes every *behavioral* metric we can measure today — tool selection,
+clarify-before-searching, honest abstention on tool failure, and injection resistance (it
+ignored instructions embedded in YouTube/AI-mode tool output). So the reliability gap is
+**not** behavioral hygiene; it is **fact-level trust** — groundedness and budget-math — which
+are exactly the two metrics still pending WIN 3 (structured source-bound output) and WIN 4
+(deterministic compute). Small-n caveat: 2 scenarios each for slot-fill/abstention/injection;
+the golden set grows as `docs/failure_modes.md` accumulates real bugs.
 
 **Cost & caching sub-scoreboard** (WIN 8 establishes the baseline cost; WIN 8.5 moves it):
 

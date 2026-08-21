@@ -15,6 +15,14 @@ class NewConversationRequest(BaseModel):
     title: Optional[str] = None
 
 
+class ShareRequest(BaseModel):
+    # The frozen itinerary snapshot to publish. Kept as a permissive dict (the
+    # itinerary was already produced/verified by the graph) with a size guard via
+    # the destination check in the route; we don't re-run full schema validation
+    # so a valid card is never rejected on a datetime/format technicality.
+    itinerary: dict
+
+
 class ConversationSummary(BaseModel):
     id: str
     title: Optional[str]

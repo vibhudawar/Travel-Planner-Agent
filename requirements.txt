@@ -31,3 +31,4 @@ supabase==2.31.0
 langgraph-checkpoint-postgres==2.0.25
 psycopg[binary]==3.3.4
 psycopg-pool==3.3.1
+airportsdata==20260315

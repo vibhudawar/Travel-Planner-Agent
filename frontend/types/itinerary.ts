@@ -33,6 +33,7 @@ export type Activity = {
   name: string
   kind?: string | null
   notes?: string | null
+  link?: string | null
   source_tool: SourceTool
 }
 
@@ -53,7 +54,21 @@ export type DayPlan = {
 }
 
 export type BudgetItem = { label: string; amount: number; source_tool: SourceTool | null }
-export type Budget = { currency: string; items: BudgetItem[]; total: number | null }
+export type Budget = {
+  currency: string
+  items: BudgetItem[]
+  total: number | null
+  cap?: number | null
+  cap_currency?: string | null
+  home_currency?: string | null
+  total_home?: number | null
+  cap_home?: number | null
+  fx_rate?: number | null
+  fx_note?: string | null
+  over_budget?: boolean | null
+  over_by_home?: number | null
+  assessment?: string | null
+}
 export type Source = { tool: SourceTool; retrieved_at: string; summary: string | null }
 
 export type Verification = {

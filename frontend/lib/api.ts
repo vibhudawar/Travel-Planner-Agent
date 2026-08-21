@@ -3,7 +3,9 @@
 
 import type { Itinerary } from "@/types/itinerary"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL
+// Defaults to the local backend so dev works without extra config; override with
+// NEXT_PUBLIC_API_URL in production (Render URL).
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export type ChatMessage = {
   role: "user" | "assistant"
@@ -19,7 +21,6 @@ export type ConversationSummary = {
 }
 
 function baseUrl(): string {
-  if (!API_URL) throw new Error("NEXT_PUBLIC_API_URL is not set")
   return API_URL.replace(/\/$/, "")
 }
 
@@ -66,12 +67,14 @@ export type StreamCallbacks = {
 }
 
 export async function streamChat(
-  params: { message: string; conversationId?: string; token: string; signal?: AbortSignal },
+  params: { message: string; conversationId?: string; signal?: AbortSignal },
   cb: StreamCallbacks,
 ): Promise<void> {
-  const res = await fetch(`${baseUrl()}/chat/stream`, {
+  // Same-origin proxy (app/api/chat/stream) injects the auth token server-side and
+  // forwards to the backend — no client token, no CORS.
+  const res = await fetch(`/api/chat/stream`, {
     method: "POST",
-    headers: { ...authHeaders(params.token), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: params.message, conversation_id: params.conversationId ?? null }),
     signal: params.signal,
   })

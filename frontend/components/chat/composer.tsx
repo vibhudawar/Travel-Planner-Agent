@@ -35,7 +35,7 @@ export function Composer({
   }
 
   return (
-    <div className="bg-background p-3">
+    <div className="rounded-b-xl bg-background p-3">
       <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm focus-within:ring-1 focus-within:ring-ring">
         <textarea
           ref={ref}

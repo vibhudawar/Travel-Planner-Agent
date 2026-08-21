@@ -1,347 +1,255 @@
-# Trip Planner AI
+# Trip Planner
 
-An intelligent travel planning assistant powered by LangGraph and LangChain that helps users plan complete trips using AI-powered tools and real-time data.
+A LangGraph trip-planning agent behind a FastAPI streaming API, with a Next.js
+frontend and Supabase (Postgres + auth + pgvector).
 
----
-
-## 🎥 Project Walkthrough
-
-Watch the complete project walkthrough to see the Agentic Chatbot in action:
-
-[![Agentic Chatbot Walkthrough](https://img.youtube.com/vi/mw7kImMa-bc/maxresdefault.jpg)](https://youtu.be/mw7kImMa-bc)
-
-*Click the image above to watch the full walkthrough on YouTube*
+The premise is **a plan you can trust**. Every price, flight, and hotel shows where
+it came from and how fresh it is; facts the tools didn't actually return are dropped
+rather than guessed; and anything checkable — the budget total, currency conversion,
+weather labelling, airport codes — is computed in code instead of being taken on the
+model's word.
 
 ---
 
-## Features
+## Demo
 
-- **Conversational Trip Planning** - Natural language interface for planning trips
-- **Multi-Tool Integration** - Searches flights, hotels, weather, attractions, and travel vlogs
-- **AI-Powered Search** - Google AI Mode integration for curated travel information
-- **Real-Time Data** - Live flight prices, hotel availability, and weather forecasts
-- **Intelligent Orchestration** - LLM decides which tools to use based on user needs
-- **Persistent Conversations** - Chat history saved with thread-based memory
-- **Transparent Tool Execution** - See which tools are called and what data is retrieved
+<!-- Add the walkthrough video / GIF here. -->
+
+_Walkthrough coming soon._
+
+---
+
+## What it does
+
+- **Conversational planning.** Describe a trip in plain language (or the structured
+  form); the agent asks for what's missing, then gathers flights, hotels, weather,
+  attractions, and reference vlogs.
+- **Source-bound itinerary.** Each flight, hotel, and weather line carries a
+  `source_tool` and a `retrieved_at` timestamp, surfaced in the UI as source chips
+  and an "as of" freshness note.
+- **Deterministic budget.** The total is `cheapest flight × travelers + cheapest
+  hotel × nights`, computed in code, shown in the user's currency via a live FX rate,
+  with an over/under verdict against their cap.
+- **Verified, not hallucinated.** A verifier prunes any price or name not present in
+  the tool output; a pruned category becomes an honest disclaimer instead of a made-up
+  answer.
+- **Shareable.** Any itinerary can be frozen to a public, login-free `/i/<code>` page
+  with an OG preview.
+- **Cheap on repeats.** A slot-aware semantic cache reuses the stable itinerary
+  skeleton for near-identical requests while always re-fetching live prices — so a
+  cache hit is fast but never stale.
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Agent | LangGraph + LangChain, OpenAI models |
+| API | FastAPI, Server-Sent Events (streaming) |
+| Frontend | Next.js (App Router), Tailwind, shadcn |
+| Data | Supabase — Postgres, auth, pgvector |
+| External | SerpAPI (flights/hotels/maps/YouTube), OpenWeather + Open-Meteo (weather), airportsdata (offline IATA), open.er-api.com (FX) |
+| Ops | Docker + Render (API), Vercel (frontend), LangSmith (tracing), GitHub Actions (CI) |
+
+---
 
 ## Architecture
 
-### Tech Stack
-- **LangGraph** - Workflow orchestration and state management
-- **LangChain** - LLM framework and tool integration
-- **Streamlit** - Interactive web UI
-- **OpenAI GPT** - Conversational AI and reasoning
-- **SerpAPI** - Google Flights, Hotels, Maps, YouTube data
-- **OpenWeather API** - Weather forecasts
-- **SQLite** - Conversation persistence
+```mermaid
+flowchart TB
+    subgraph Client["Browser — Next.js on Vercel"]
+        UI["Chat UI + ItineraryView<br/>(source chips, freshness, budget verdict)"]
+        Proxy["Same-origin /api/* proxy routes<br/>(inject Supabase token server-side)"]
+        UI --> Proxy
+    end
 
-### Components
+    subgraph API["FastAPI on Render (Docker)"]
+        Auth["Verify Supabase JWT<br/>(server-side, no impersonation)"]
+        Stream["POST /chat/stream (SSE)"]
+        Cache{"Semantic cache<br/>check"}
+        Graph["LangGraph agent"]
+        Share["GET /shared/{code}"]
+        Loc["GET /locations<br/>(airport autocomplete)"]
+        Auth --> Stream --> Cache
+    end
 
-```
-travel-agent-v2/
-├── backend.py      # LangGraph agent workflow
-├── frontend.py     # Streamlit UI
-├── tools.py        # Tool implementations
-├── prompts.py      # System prompts
-└── .env           # API keys
-```
+    subgraph DB["Supabase Postgres"]
+        CP["LangGraph checkpointer<br/>(conversation state)"]
+        Conv["conversations (RLS)"]
+        Shared["shared_itineraries (RLS)"]
+        QC["query_cache (pgvector)"]
+    end
 
-## Installation
-
-### Prerequisites
-- Python 3.8+
-- OpenAI API key
-- SerpAPI key
-- OpenWeather API key
-
-### Setup
-
-1. **Clone the repository**
-```bash
-cd travel-agent-v2
-```
-
-2. **Create virtual environment**
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+    Proxy -->|"Bearer token"| Auth
+    Cache -->|"HIT: reuse skeleton,<br/>re-fetch live prices"| Graph
+    Cache -->|"MISS"| Graph
+    Graph --> CP
+    Stream --> Conv
+    Share --> Shared
+    Cache -.-> QC
+    Graph -->|"external data"| Ext["SerpAPI · OpenWeather /<br/>Open-Meteo · Maps · YouTube"]
 ```
 
-3. **Install dependencies**
-```bash
-pip install -r requirements.txt
+The through-line is reliability. The frontend never holds a backend token — the
+browser calls same-origin proxy routes (`/api/chat/stream`, `/api/share`,
+`/api/locations`) that attach the Supabase session token server-side, so there's no
+client secret and no CORS. Row-level security scopes every user to their own
+conversations and shares.
+
+### The agent graph
+
+```mermaid
+flowchart LR
+    START([START]) --> chat["chat_node<br/>(LLM: answer or call tools)"]
+    chat -->|tool calls| tools["tools<br/>(flights, hotels, weather,<br/>attractions, web, youtube)"]
+    tools --> chat
+    chat -->|"no tools used yet<br/>(needs clarification)"| END1([END])
+    chat -->|"tools used,<br/>done gathering"| synth["synthesize<br/>(structured, source-bound<br/>itinerary)"]
+    synth --> verify["verify<br/>(prune unsupported facts,<br/>recompute budget)"]
+    verify --> END2([END])
 ```
 
-4. **Configure environment variables**
+- **chat_node** — the LLM either asks a clarifying question, calls tools, or signals
+  it's done. This is the ReAct loop; it can call tools multiple times.
+- **synthesize** — once tools have run, a structured-output model turns the gathered
+  data into an `Itinerary`. Currency, weather labels, and the budget are then
+  overwritten by code, never trusted from the model.
+- **verify** — a value verifier removes any fact whose price/name isn't backed by the
+  tool output, re-computes the budget on what survives, and records what it dropped.
 
-Create a `.env` file in the project root:
+### A request, end to end
 
-```env
-# Required API Keys
-OPENAI_API_KEY=your_openai_api_key_here
-SERPAPI_API_KEY=your_serpapi_key_here
-OPENWEATHER_API_KEY=your_openweather_key_here
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant P as /api proxy (Next.js)
+    participant A as FastAPI
+    participant C as Semantic cache (pgvector)
+    participant G as LangGraph agent
+    participant X as External APIs
 
-# Optional
-CACHE_DIR=./cache
+    U->>P: POST /api/chat/stream
+    P->>A: forward + Supabase Bearer token
+    A->>C: slot-aware lookup
+    alt cache hit
+        C-->>A: itinerary skeleton
+        A->>X: re-fetch live flight + hotel prices
+        A-->>U: stream reused plan (fresh prices)
+    else cache miss
+        A->>G: run graph
+        G->>X: search flights / hotels / weather / …
+        G->>G: synthesize → verify
+        G-->>A: source-bound itinerary
+        A-->>U: stream tokens + itinerary
+        A->>C: remember skeleton
+    end
 ```
 
-**Get API Keys:**
-- OpenAI: https://platform.openai.com/api-keys
-- SerpAPI: https://serpapi.com/manage-api-key
-- OpenWeather: https://home.openweathermap.org/api_keys
-
-## Usage
-
-### Run the Application
-
-```bash
-streamlit run frontend.py
-```
-
-The app will open in your browser at `http://localhost:8501`
-
-### Example Conversations
-
-**Simple Trip Planning:**
-```
-User: I want to plan a trip to Paris
-Agent: I'd be happy to help! To plan your Paris trip, I need a few details:
-        - Where will you be traveling from?
-        - What dates are you considering?
-        - What's your approximate budget?
-        - How many travelers?
-```
-
-**Complete Trip Request:**
-```
-User: Plan a 5-day trip to Tokyo from NYC, departing June 1st,
-      budget $3000, 2 adults
-
-Agent: [Uses tools: search_flights, search_hotels, search_weather,
-        search_attractions, search_youtube_vlogs]
-
-        [Generates complete itinerary with flights, hotels, daily
-        activities, weather info, and budget breakdown]
-```
-
-**General Travel Questions:**
-```
-User: What are the best months to visit Bali?
-
-Agent: [Uses google_search tool to get AI-curated travel advice]
-```
-
-## Available Tools
-
-The agent has access to these tools:
-
-| Tool | Purpose | Data Source |
-|------|---------|-------------|
-| `search_flights` | Find flight options with prices | Google Flights (SerpAPI) |
-| `search_hotels` | Find hotel accommodations | Google Hotels (SerpAPI) |
-| `search_weather` | Get weather forecasts | OpenWeather API |
-| `search_attractions` | Find places to visit | Google Maps (SerpAPI) |
-| `search_youtube_vlogs` | Find travel vlogs/guides | YouTube (SerpAPI) |
-| `google_search` | AI-curated web search | Google AI Mode (SerpAPI) |
-| `calculator` | Basic arithmetic | Built-in |
-
-## How It Works
-
-1. **User Input** - User asks about trip planning
-2. **Clarification** - Agent asks for missing information (dates, budget, etc.)
-3. **Tool Selection** - LLM decides which tools to call based on needs
-4. **Data Gathering** - Tools fetch real-time data from APIs
-5. **Itinerary Generation** - Agent creates comprehensive day-by-day plan
-6. **Budget Breakdown** - Provides cost estimates and recommendations
-
-### LangGraph Workflow
-
-```
-START -> chat_node -> [tools_condition]
-            ^              |
-            |              v
-            +---- tools <--+
-```
-
-- **chat_node**: LLM processes messages and decides actions
-- **tools**: Executes selected tools
-- **tools_condition**: Routes to tools if needed, or ends if done
-
-## Graph Architecture
-
-The following diagram illustrates the LangGraph workflow architecture:
-
-![Agentic Chatbot Graph](assets/agentic_chatbot_graph.png)
-
-**Workflow Components:**
-
-- **`__start__`**: Entry point of the workflow
-- **`chat_node`**: Core conversational AI that processes user messages and decides actions
-- **`tools`**: Executes external tools (flights, hotels, weather, etc.) based on LLM decisions
-- **`__end__`**: Termination point when conversation is complete
-
-**Flow Description:**
-1. Workflow begins at `__start__` and proceeds to `chat_node`
-2. `chat_node` analyzes the user input and decides whether to:
-   - End the conversation (route to `__end__`)
-   - Use tools to gather information (route to `tools`)
-3. If tools are needed, `tools` executes the selected tool(s)
-4. After tool execution, control returns to `chat_node` for further processing
-5. This creates an iterative loop allowing the agent to use multiple tools and continue the conversation
-
-The dotted arrows represent conditional transitions based on the LLM's decision-making, while solid arrows show the standard flow path.
-
-## Features in Detail
-
-### Conversation Memory
-- Each conversation has a unique thread ID
-- Chat history persisted in SQLite database
-- Switch between conversations in sidebar
-- Create new chats anytime
-
-### Tool Execution Transparency
-- Status container shows which tools are running
-- View parameters passed to each tool
-- See result summaries (e.g., "Found 10 flights")
-- Expandable logs for full transparency
-
-### Intelligent Tool Usage
-The agent intelligently decides:
-- Skip flight search if user already booked
-- Skip hotel search if accommodation arranged
-- Always check weather for planning
-- Find attractions based on interests
-- Search vlogs for inspiration
-
-### Caching
-- API responses cached for 6 hours
-- Reduces API costs and latency
-- Automatic cache invalidation
-
-## Configuration
-
-### Customize System Prompt
-Edit `prompts.py` to modify agent behavior:
-```python
-TRIP_PLANNER_SYSTEM_PROMPT = """
-Your custom instructions here...
-"""
-```
-
-### Add New Tools
-1. Define tool in `tools.py` with `@tool` decorator
-2. Add to `ALL_TOOLS` list
-3. Tool automatically available to agent
-
-### Adjust LLM Model
-Edit `backend.py`:
-```python
-llm = ChatOpenAI(model="gpt-4")  # or gpt-3.5-turbo, gpt-4o, etc.
-```
-
-## Project Structure
-
-```
-travel-agent-v2/
-├── backend.py          # LangGraph agent graph definition
-├── frontend.py         # Streamlit UI with chat interface
-├── tools.py           # Tool implementations (@tool decorated)
-├── prompts.py         # System prompt configuration
-├── requirements.txt   # Python dependencies
-├── .env              # API keys (not committed)
-├── .gitignore        # Git ignore rules
-├── cache/            # API response cache (auto-created)
-├── chatbot.db        # SQLite conversation store (auto-created)
-└── README.md         # This file
-```
-
-## Troubleshooting
-
-### API Key Errors
-```
-Error: SERPAPI_API_KEY not found in environment
-```
-**Solution:** Ensure `.env` file exists with valid API keys
-
-### Import Errors
-```
-ModuleNotFoundError: No module named 'langgraph'
-```
-**Solution:** Install dependencies: `pip install -r requirements.txt`
-
-### Database Locked
-```
-sqlite3.OperationalError: database is locked
-```
-**Solution:** Close other instances of the app accessing `chatbot.db`
-
-### Tool Errors
-Check logs in terminal for detailed error messages. Common issues:
-- Invalid API keys
-- Rate limits exceeded
-- Invalid date formats (use YYYY-MM-DD)
-- Missing required parameters
-
-## Development
-
-### Running Tests
-```bash
-# Test individual tools
-python -c "from tools import search_flights; print(search_flights('NYC', 'LAX', '2025-07-01'))"
-```
-
-### Debug Mode
-Add to `backend.py` for verbose logging:
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-### View Graph
-```python
-from backend import chatbot
-chatbot.get_graph().print_ascii()
-```
-
-## Future Enhancements
-
-- [ ] Multi-city trip planning
-- [ ] Budget optimization algorithms
-- [ ] Restaurant recommendations
-- [ ] Travel visa requirements
-- [ ] Currency conversion
-- [ ] Collaborative trip planning (multiple users)
-- [ ] Export itinerary to PDF/Calendar
-- [ ] Integration with booking platforms
-
-## License
-
-MIT License - Feel free to use and modify for your projects.
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Support
-
-For issues or questions:
-- Check the troubleshooting section
-- Review API documentation (SerpAPI, OpenWeather)
-- Open an issue on GitHub
-
-## Acknowledgments
-
-- **LangChain** - LLM application framework
-- **LangGraph** - Workflow orchestration
-- **SerpAPI** - Real-time search data
-- **OpenAI** - Conversational AI
-- **Streamlit** - Rapid UI development
+Deeper design notes and the file map live in
+[`docs/architecture.md`](docs/architecture.md). The full reliability roadmap and
+decisions are in [`plan-v2.md`](plan-v2.md).
 
 ---
 
-Built with LangGraph and LangChain
+## Tools
+
+The agent has access to these tools; the LLM decides which to call.
+
+| Tool | Purpose | Source |
+|---|---|---|
+| `search_flights` | Flight options with prices | Google Flights (SerpAPI) |
+| `search_hotels` | Hotels with nightly rates | Google Hotels (SerpAPI) |
+| `search_weather` | Forecast or seasonal norms, labelled | OpenWeather + Open-Meteo |
+| `search_attractions` | Things to do | Google Maps (SerpAPI) |
+| `search_youtube_vlogs` | Reference vlogs / guides | YouTube (SerpAPI) |
+| `google_search` | Curated web answer | Google AI Mode (SerpAPI) |
+
+Tool output is validated, freshness-stamped, and neutralized against prompt
+injection before it reaches the model. Prices are always requested in USD and
+converted for display; airport codes are resolved offline from `airportsdata`.
+
+---
+
+## Running locally
+
+### Prerequisites
+- Python 3.12
+- Node 20+ and `pnpm`
+- A Supabase project (URL, publishable key, secret key, session-pooler DB URL)
+- API keys: OpenAI, SerpAPI, OpenWeather (LangSmith optional)
+
+### Backend (FastAPI agent)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Copy `.env.example` to `.env` and fill in your keys, then apply the database
+migrations once against your Supabase project:
+
+```bash
+for f in supabase/migrations/*.sql; do psql "$DATABASE_POOLED_URL" -f "$f"; done
+```
+
+Run the API:
+
+```bash
+uvicorn api.main:app --reload --port 8000
+```
+
+Health check: `http://localhost:8000/readyz` should return `{"status":"ready"}`.
+
+### Frontend (Next.js)
+
+```bash
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Set the frontend environment variables (`NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `API_URL` pointing at the backend). The
+app runs at `http://localhost:3000`.
+
+---
+
+## Deployment
+
+The API deploys to Render as a Docker service (`Dockerfile` + `render.yaml`, binding
+`$PORT`); the frontend deploys to Vercel with root directory `frontend`. Both talk to
+the same Supabase project. Step-by-step instructions — env vars, migrations, CORS,
+and the Supabase auth redirect config — are in [`docs/deploy.md`](docs/deploy.md).
+
+CI (`.github/workflows/ci.yml`) runs the network-free backend tests and the frontend
+typecheck/lint on every pull request.
+
+---
+
+## Project layout
+
+```
+travel-agent-v2/
+├── backend.py            # LangGraph agent graph (chat → tools → synthesize → verify)
+├── prompts.py            # System + synthesis prompts
+├── tools.py              # Tool implementations (validated, freshness-stamped, fenced)
+├── schema.py             # Itinerary data model
+├── compute.py  fx.py     # Deterministic budget + live currency conversion
+├── verifier.py           # Prunes unsupported facts (abstention)
+├── enrich.py             # Attaches booking / map links to verified facts
+├── locations.py          # Offline airport (IATA) resolution + autocomplete
+├── cache.py              # Slot-aware semantic response cache (pgvector)
+├── observability.py      # LangSmith tracing + token/cost accounting
+├── settings.py           # Validated settings (no import-time side effects)
+├── api/                  # FastAPI app: main, auth, db, streaming, schemas
+├── supabase/migrations/  # conversations, shared_itineraries, query_cache
+├── frontend/             # Next.js App Router app
+├── evals/                # Offline evaluation suite
+└── docs/                 # architecture.md, deploy.md
+```
+
+---
+
+## License
+
+MIT.

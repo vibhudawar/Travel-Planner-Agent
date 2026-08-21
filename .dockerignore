@@ -1,0 +1,21 @@
+# The backend image needs only the Python app — keep the frontend, envs, caches,
+# and local DBs out (smaller image, no secrets baked in).
+frontend/
+.venv/
+venv/
+node_modules/
+cache/
+data/
+*.db
+.git/
+.github/
+.env
+.env.*
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+evals/reports/
+docs/
+*.md

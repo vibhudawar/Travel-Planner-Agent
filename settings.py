@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     # Eval judge model — intentionally different from openai_model so the generator
     # never grades its own output (judge ≠ generator). Override via JUDGE_MODEL.
     judge_model: str = Field("gpt-4o-mini", description="Model used by eval LLM judges and the WIN 7 verifier")
+
+    # --- Semantic response cache (WIN 9.2) ---
+    # Reuse the stable itinerary skeleton across near-identical requests (prices are
+    # always re-fetched). Fails safe: any error => cache miss.
+    enable_semantic_cache: bool = Field(True, description="Serve/store the pgvector response-skeleton cache")
+    embedding_model: str = Field("text-embedding-3-small", description="OpenAI embedding model for intent similarity")
+    cache_similarity_threshold: float = Field(
+        0.2, ge=0.0, le=2.0, description="Max cosine distance for a semantic hit (lower = stricter)"
+    )
+    semantic_cache_ttl_hours: float = Field(72.0, gt=0, description="TTL for a cached skeleton")
     # WIN 7: the deterministic value verifier is authoritative and always runs. The
     # optional second-model (LLM) pass is OFF by default — with a cheap judge it
     # produces formatting noise for no gain and adds cost. Turn on (ideally with a

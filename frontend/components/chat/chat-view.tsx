@@ -5,10 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { streamChat, type ChatMessage } from "@/lib/api"
-import { createClient } from "@/lib/supabase/client"
 
 import { Composer } from "./composer"
 import { MessageBubble } from "./message-bubble"
+import { TripForm } from "./trip-form"
 
 // The chat surface (client leaf). Drives the SSE stream, keeps the URL + sidebar
 // in sync when a brand-new thread is created. Keyed by conversationId at the page
@@ -45,13 +45,6 @@ export function ChatView({
 
   const send = useCallback(
     async (message: string) => {
-      const { data } = await createClient().auth.getSession()
-      const token = data.session?.access_token
-      if (!token) {
-        toast.error("Your session expired. Please sign in again.")
-        return
-      }
-
       setMessages((m) => [...m, { role: "user", content: message }, { role: "assistant", content: "" }])
       setStreaming(true)
 
@@ -59,7 +52,7 @@ export function ChatView({
       abortRef.current = controller
 
       await streamChat(
-        { message, conversationId: convIdRef.current, token, signal: controller.signal },
+        { message, conversationId: convIdRef.current, signal: controller.signal },
         {
           onConversation: (id) => {
             convIdRef.current = id
@@ -75,8 +68,14 @@ export function ChatView({
           },
           onDone: () => {},
         },
-      ).catch(() => {
-        // Aborted (stop / unmount) — no toast needed.
+      ).catch((err) => {
+        // Ignore user-initiated aborts (stop / unmount); surface anything else.
+        if (err?.name !== "AbortError") {
+          toast.error("Couldn't reach the planner. Please try again.")
+          patchLast((last) =>
+            last.content ? last : { ...last, content: "_Something went wrong. Please try again._" },
+          )
+        }
       })
 
       setStreaming(false)
@@ -102,13 +101,14 @@ export function ChatView({
   return (
     <div className="flex h-full flex-col">
       {empty ? (
-        <div className="flex flex-1 items-center justify-center p-6">
-          <div className="max-w-md text-center">
+        <div className="flex flex-1 items-center justify-center overflow-y-auto p-6">
+          <div className="w-full max-w-xl text-center">
             <h1 className="text-2xl font-semibold tracking-tight">Where to next?</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Describe your trip and get a sourced, verified itinerary — flights, hotels, weather,
-              and a day-by-day plan.
+              Fill in your trip for a sourced, verified itinerary — flights, hotels, weather, and a
+              day-by-day plan. Or just describe it below.
             </p>
+            <TripForm onPlan={send} />
           </div>
         </div>
       ) : (

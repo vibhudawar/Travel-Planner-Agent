@@ -56,6 +56,8 @@ class Activity(BaseModel):
     name: str
     kind: Optional[str] = Field(default=None, description="e.g. sightseeing, food, museum")
     notes: Optional[str] = None
+    # Actionable link (Google Maps place/search URL), attached in code post-verify.
+    link: Optional[str] = None
     source_tool: SourceTool = SourceTool.attractions
 
 
@@ -93,6 +95,22 @@ class Budget(BaseModel):
     items: List[BudgetItem] = Field(default_factory=list)
     # total is proposed by the model here; WIN 4 will compute and verify it in code.
     total: Optional[float] = None
+    # --- Budget adherence + home-currency display (all code-authored) ---
+    # The user's stated budget cap and its currency, if they gave one.
+    cap: Optional[float] = None
+    cap_currency: Optional[str] = None
+    # The total re-expressed in the user's home currency (e.g. INR) for legibility.
+    home_currency: Optional[str] = None
+    total_home: Optional[float] = None
+    cap_home: Optional[float] = None
+    # Approximate FX used for the home-currency display, and a note flagging it.
+    fx_rate: Optional[float] = None
+    fx_note: Optional[str] = None
+    # True/False once a cap is known; None when the user gave no budget.
+    over_budget: Optional[bool] = None
+    # Signed gap in home currency: positive = over budget, negative = under.
+    over_by_home: Optional[float] = None
+    assessment: Optional[str] = None
 
 
 class Source(BaseModel):
@@ -111,6 +129,11 @@ class ItineraryDraft(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     travelers: Optional[int] = None
+    # The user's stated budget cap, if any, and the currency they expressed it in
+    # (e.g. 100000 / "INR"). Extracted from the conversation; used to assess and
+    # flag budget adherence in code (never to fabricate prices).
+    budget_cap: Optional[float] = None
+    budget_currency: Optional[str] = None
     overview: Optional[str] = None
     flights: List[FlightOption] = Field(default_factory=list)
     hotels: List[HotelOption] = Field(default_factory=list)

@@ -90,6 +90,13 @@ def create_app() -> FastAPI:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "not ready")
         return {"status": "ready"}
 
+    @app.get("/locations")
+    async def locations(q: str = "", limit: int = 8):
+        """Airport autocomplete (public reference data). Returns ranked candidates."""
+        from locations import search_locations
+
+        return {"results": search_locations(q, limit=max(1, min(limit, 20)))}
+
     @app.post("/conversations")
     async def create_conversation(
         body: NewConversationRequest,

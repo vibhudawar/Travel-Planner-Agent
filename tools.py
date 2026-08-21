@@ -6,15 +6,17 @@ import hashlib
 import json
 import logging
 import re
+import urllib.parse
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 import requests
 import diskcache
 from serpapi import GoogleSearch
 from langchain_core.tools import tool
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from locations import resolve_iata
 from settings import get_settings
 
 # Configure logging
@@ -100,6 +102,26 @@ def _wrap_untrusted(text: str, source: str) -> str:
         f"{_neutralize_injection(text)}\n"
         f"<<END UNTRUSTED {source} CONTENT>>"
     )
+
+def _maps_link(name: Optional[str], location: str, place_id=None, gps=None) -> Optional[str]:
+    """Build a Google Maps link for a place (deep-links via place_id when present)."""
+    if not name:
+        return None
+    query = urllib.parse.quote_plus(f"{name}, {location}")
+    if place_id:
+        return f"https://www.google.com/maps/search/?api=1&query={query}&query_place_id={place_id}"
+    if isinstance(gps, dict) and gps.get("latitude") is not None and gps.get("longitude") is not None:
+        return f"https://www.google.com/maps/search/?api=1&query={gps['latitude']},{gps['longitude']}"
+    return f"https://www.google.com/maps/search/?api=1&query={query}"
+
+
+def google_flights_link(departure: str, arrival: str, outbound_date: Optional[str]) -> str:
+    """A Google Flights search URL for a route/date (SerpAPI gives only a token)."""
+    q = f"Flights from {departure} to {arrival}"
+    if outbound_date:
+        q += f" on {outbound_date}"
+    return f"https://www.google.com/travel/flights?q={urllib.parse.quote_plus(q)}"
+
 
 @tool
 def google_search(query: str) -> dict:
@@ -218,6 +240,15 @@ def _serpapi_search(
     return result
 
 
+def _resolve_airport(value: str) -> str:
+    """City/name -> IATA code via the offline airports dataset (see locations.py).
+    Falls back to the raw value if unresolved (the model is also prompted to pass
+    codes, and the frontend autocomplete resolves before the query is even sent)."""
+    if not value:
+        return value
+    return resolve_iata(value) or value.strip()
+
+
 @tool
 def search_flights(
     departure: str,
@@ -230,8 +261,8 @@ def search_flights(
     Search for flight options between two cities using Google Flights via SerpAPI.
 
     Args:
-        departure: Departure airport code or city name (e.g., "JFK" or "New York")
-        arrival: Arrival airport code or city name (e.g., "CDG" or "Paris")
+        departure: Departure city or IATA airport code (e.g., "Delhi" or "DEL")
+        arrival: Arrival city or IATA airport code (e.g., "Bali" or "DPS")
         outbound_date: Departure date in YYYY-MM-DD format
         return_date: Return date in YYYY-MM-DD format (optional, for round trip)
         adults: Number of adult passengers (default: 1)
@@ -239,10 +270,12 @@ def search_flights(
     Returns:
         Dictionary with flight options including prices, airlines, and durations
     """
+    departure_id = _resolve_airport(departure)
+    arrival_id = _resolve_airport(arrival)
     params = {
         "engine": "google_flights",
-        "departure_id": departure,
-        "arrival_id": arrival,
+        "departure_id": departure_id,
+        "arrival_id": arrival_id,
         "outbound_date": outbound_date,
         "adults": adults,
         "currency": "USD",
@@ -346,7 +379,11 @@ def search_hotels(
         # 60% weight on price, 40% on rating
         return (1 - norm_price) * 0.6 + norm_rating * 0.4
 
-    sorted_properties = sorted(properties, key=calculate_value_score, reverse=True)
+    # Only keep properties with a real nightly rate — SerpAPI returns some listings
+    # (ads / no availability) with no rate, which must not appear as "$0/night" or
+    # win the cheapest-hotel budget comparison.
+    priced = [p for p in properties if (p.get("rate_per_night") or {}).get("extracted_lowest")]
+    sorted_properties = sorted(priced, key=calculate_value_score, reverse=True)
 
     # Slim top-5 (WIN 8.5): keep booking-relevant fields, drop the long description.
     hotels = []
@@ -384,8 +421,36 @@ def _weather_horizon(start_date: str) -> tuple:
     return (is_forecast, horizon_days)
 
 
-def _fetch_weather(api_key: str, prompt: str) -> dict:
-    """One OpenWeather call, retried on transient failures."""
+# Free weather stack (no paid subscription): OpenWeather's One Call "assistant"
+# endpoint requires a paid plan (401 on standard keys), so weather is served from
+# free endpoints instead — OpenWeather's free 5-day forecast for near-term trips,
+# and Open-Meteo (keyless) for longer-range forecasts and seasonal (last-year)
+# expectations. Nothing is fabricated: a trip beyond real-forecast range shows
+# last year's actuals for the same dates, clearly labelled.
+
+# Real forecasts are trustworthy this far out; OpenWeather free covers ~5 days,
+# Open-Meteo ~16. Beyond that we fall back to seasonal (historical) data.
+_OPENWEATHER_FORECAST_DAYS = 5
+_OPENMETEO_FORECAST_DAYS = 16
+
+# WMO weather codes (Open-Meteo) -> short text.
+_WMO_TEXT = {
+    0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+    45: "fog", 48: "rime fog", 51: "light drizzle", 53: "drizzle", 55: "heavy drizzle",
+    56: "freezing drizzle", 57: "freezing drizzle", 61: "light rain", 63: "rain",
+    65: "heavy rain", 66: "freezing rain", 67: "freezing rain", 71: "light snow",
+    73: "snow", 75: "heavy snow", 77: "snow grains", 80: "light showers",
+    81: "showers", 82: "violent showers", 85: "snow showers", 86: "heavy snow showers",
+    95: "thunderstorm", 96: "thunderstorm with hail", 99: "thunderstorm with hail",
+}
+
+
+def _http_get_json(url: str, params: dict) -> Optional[Any]:
+    """GET JSON, retrying only transient (network/5xx) failures; None on failure.
+
+    4xx responses (e.g. a 401 from an endpoint the key can't access) are NOT
+    retried — retrying them just wastes time and log noise.
+    """
     settings = get_settings()
 
     @retry(
@@ -394,17 +459,145 @@ def _fetch_weather(api_key: str, prompt: str) -> dict:
         wait=wait_exponential(multiplier=0.5, max=4),
         reraise=True,
     )
-    def _call() -> dict:
-        response = requests.post(
-            "https://api.openweathermap.org/assistant/session",
-            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
-            json={"prompt": prompt},
-            timeout=settings.serpapi_timeout_seconds,
-        )
-        response.raise_for_status()
-        return response.json()
+    def _call():
+        r = requests.get(url, params=params, timeout=settings.serpapi_timeout_seconds)
+        if r.status_code >= 500:
+            r.raise_for_status()  # transient -> retry
+        return r
 
-    return _call()
+    try:
+        resp = _call()
+    except Exception as exc:  # exhausted retries / network
+        logger.error(f"HTTP GET failed: {url} - {exc}")
+        return None
+    if not resp.ok:
+        logger.warning(f"HTTP {resp.status_code} from {url}")
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        return None
+
+
+def _geocode(location: str) -> tuple:
+    """Resolve a place name to (lat, lon, resolved_name). Uses Open-Meteo's keyless
+    geocoder first (reliable, no quota), then OpenWeather's free geocoder."""
+    om = _http_get_json(
+        "https://geocoding-api.open-meteo.com/v1/search", {"name": location, "count": 1}
+    )
+    results = (om or {}).get("results") or []
+    if results:
+        return results[0].get("latitude"), results[0].get("longitude"), results[0].get("name") or location
+    api_key = get_settings().openweather_api_key.get_secret_value()
+    ow = _http_get_json(
+        "https://api.openweathermap.org/geo/1.0/direct",
+        {"q": location, "limit": 1, "appid": api_key},
+    )
+    if isinstance(ow, list) and ow:
+        return ow[0].get("lat"), ow[0].get("lon"), ow[0].get("name") or location
+    return None, None, location
+
+
+def _summarize_days(days: List[dict], label: str, source: str) -> str:
+    """One-line-per-day human summary, e.g. 'Sep 15: 27–34°C, thunderstorm'."""
+    lines = []
+    for d in days:
+        parts = []
+        lo, hi = d.get("low_c"), d.get("high_c")
+        if lo is not None and hi is not None:
+            parts.append(f"{round(lo)}–{round(hi)}°C")
+        if d.get("conditions"):
+            parts.append(d["conditions"])
+        if d.get("precip_pct") is not None:
+            parts.append(f"{round(d['precip_pct'])}% precip")
+        lines.append(f"{d.get('date', '?')}: " + ", ".join(parts) if parts else str(d.get("date")))
+    return f"{label}\n" + "\n".join(lines) if lines else label
+
+
+def _openweather_forecast(lat, lon, start_date, end_date) -> Optional[List[dict]]:
+    """Aggregate OpenWeather's free 3-hourly 5-day forecast into per-day min/max/cond."""
+    api_key = get_settings().openweather_api_key.get_secret_value()
+    data = _http_get_json(
+        "https://api.openweathermap.org/data/2.5/forecast",
+        {"lat": lat, "lon": lon, "units": "metric", "appid": api_key},
+    )
+    entries = (data or {}).get("list") or []
+    if not entries:
+        return None
+    by_day: Dict[str, dict] = {}
+    for e in entries:
+        day = (e.get("dt_txt") or "")[:10]
+        if not day or day < start_date or day > end_date:
+            continue
+        main = e.get("main") or {}
+        cond = ((e.get("weather") or [{}])[0]).get("description")
+        slot = by_day.setdefault(day, {"date": day, "low_c": None, "high_c": None, "conds": {}})
+        for key, val in (("low_c", main.get("temp_min")), ("high_c", main.get("temp_max"))):
+            if val is None:
+                continue
+            cur = slot[key]
+            slot[key] = val if cur is None else (min(cur, val) if key == "low_c" else max(cur, val))
+        if cond:
+            slot["conds"][cond] = slot["conds"].get(cond, 0) + 1
+    out = []
+    for day in sorted(by_day):
+        s = by_day[day]
+        conds = max(s["conds"], key=s["conds"].get) if s["conds"] else None
+        out.append({"date": day, "low_c": s["low_c"], "high_c": s["high_c"], "conditions": conds})
+    return out or None
+
+
+def _openmeteo_daily(url: str, lat, lon, start_date, end_date) -> Optional[List[dict]]:
+    """Per-day series from an Open-Meteo daily endpoint (forecast or archive)."""
+    data = _http_get_json(
+        url,
+        {
+            "latitude": lat, "longitude": lon,
+            "start_date": start_date, "end_date": end_date,
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode",
+            "timezone": "auto",
+        },
+    )
+    daily = (data or {}).get("daily") or {}
+    dates = daily.get("time") or []
+    if not dates:
+        # archive endpoint has no precipitation_probability; retry without it
+        data = _http_get_json(
+            url,
+            {
+                "latitude": lat, "longitude": lon,
+                "start_date": start_date, "end_date": end_date,
+                "daily": "temperature_2m_max,temperature_2m_min,weathercode",
+                "timezone": "auto",
+            },
+        )
+        daily = (data or {}).get("daily") or {}
+        dates = daily.get("time") or []
+        if not dates:
+            return None
+    highs = daily.get("temperature_2m_max") or []
+    lows = daily.get("temperature_2m_min") or []
+    precip = daily.get("precipitation_probability_max") or []
+    codes = daily.get("weathercode") or []
+    out = []
+    for i, day in enumerate(dates):
+        out.append({
+            "date": day,
+            "low_c": lows[i] if i < len(lows) else None,
+            "high_c": highs[i] if i < len(highs) else None,
+            "precip_pct": precip[i] if i < len(precip) else None,
+            "conditions": _WMO_TEXT.get(codes[i]) if i < len(codes) else None,
+        })
+    return out or None
+
+
+def _shift_year(date_str: str, years: int) -> str:
+    """Shift an ISO date by whole years (Feb 29 -> Feb 28) for last-year lookups."""
+    d = datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+    try:
+        return d.replace(year=d.year + years).isoformat()
+    except ValueError:
+        return d.replace(year=d.year + years, day=28).isoformat()
 
 
 @tool
@@ -412,59 +605,74 @@ def search_weather(location: str, start_date: str, end_date: str) -> dict:
     """
     Get the weather outlook for a location and date range.
 
-    Returns a real forecast when the trip is within the forecast horizon (~2 weeks
-    out), otherwise clearly-labelled seasonal expectations — never a fabricated
-    forecast for a trip months away.
+    Returns a real forecast when the trip is within forecast range (~16 days),
+    otherwise last year's actual conditions for the same dates as clearly-labelled
+    seasonal expectations — never a fabricated forecast for a trip months away.
 
     Args:
         location: City or location name (e.g., "Paris, France")
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
     """
-    api_key = get_settings().openweather_api_key.get_secret_value()
-    is_forecast, horizon_days = _weather_horizon(start_date)
+    _, horizon_days = _weather_horizon(start_date)
+    horizon = horizon_days if horizon_days is not None else 999
 
-    if is_forecast is False:
-        kind = "seasonal expectations (typical weather for this time of year)"
-        prompt = (
-            f"What is the typical seasonal weather for {location} from {start_date} to {end_date}? "
-            f"Describe average conditions for that time of year."
-        )
-    else:
-        kind = "forecast"
-        prompt = f"What's the weather forecast for {location} from {start_date} to {end_date}?"
-
-    cache_key = _stable_cache_key("weather", {"loc": location, "start": start_date, "end": end_date, "kind": kind})
+    cache_key = _stable_cache_key("weather", {"loc": location, "start": start_date, "end": end_date})
     cached = get_cached(cache_key)
     if cached is not None:
         logger.info("Weather cache hit")
         return cached
 
-    try:
-        payload = _fetch_weather(api_key, prompt)
-    except Exception as e:  # exhausted retries
-        logger.error(f"Weather API error: {str(e)}")
-        return {"error": str(e), "retrieved_at": _now_iso()}
+    lat, lon, resolved = _geocode(location)
+    if lat is None or lon is None:
+        return {"error": f"Could not locate '{location}' for a weather lookup", "retrieved_at": _now_iso()}
 
-    answer = (payload or {}).get("answer")
-    if not answer:
-        return {"error": "No weather data returned from API", "retrieved_at": _now_iso()}
+    days: Optional[List[dict]] = None
+    is_forecast = True
+    source = ""
+    label = ""
 
-    label = (
-        "Live forecast."
-        if is_forecast
-        else f"Seasonal averages, NOT a live forecast (trip is ~{horizon_days} days out; "
-        f"forecasts are only reliable ~{get_settings().weather_forecast_horizon_days} days ahead)."
-    )
+    if 0 <= horizon <= _OPENWEATHER_FORECAST_DAYS:
+        days = _openweather_forecast(lat, lon, start_date, end_date)
+        source = "OpenWeather 5-day forecast"
+    if not days and 0 <= horizon <= _OPENMETEO_FORECAST_DAYS:
+        days = _openmeteo_daily("https://api.open-meteo.com/v1/forecast", lat, lon, start_date, end_date)
+        source = "Open-Meteo forecast"
+
+    if days:
+        label = f"Live forecast for {resolved} (source: {source})."
+    else:
+        # Beyond forecast range (or forecast unavailable): last year's actuals.
+        is_forecast = False
+        ly_start, ly_end = _shift_year(start_date, -1), _shift_year(end_date, -1)
+        days = _openmeteo_daily("https://archive-api.open-meteo.com/v1/archive", lat, lon, ly_start, ly_end)
+        source = "Open-Meteo climate archive (last year's actuals)"
+        # Re-label the archive dates to the trip year so the summary reads naturally.
+        for d in days or []:
+            try:
+                d["date"] = _shift_year(d["date"], 1)
+            except Exception:  # noqa: BLE001
+                pass
+        label = (
+            f"Typical conditions for {resolved}, based on last year's actual weather for these "
+            f"dates (NOT a live forecast — trip is ~{horizon} days out, beyond reliable forecast range)."
+        )
+
+    if not days:
+        return {"error": "No weather data returned", "retrieved_at": _now_iso()}
+
     out = {
-        "weather": _neutralize_injection(answer),
-        "is_forecast": bool(is_forecast) if is_forecast is not None else None,
+        "weather": _summarize_days(days, label, source),
+        "days": days,
+        "is_forecast": is_forecast,
         "horizon_days": horizon_days,
         "label": label,
+        "source": source,
+        "location": resolved,
         "retrieved_at": _now_iso(),
     }
     set_cached(cache_key, out, expiry_hours=get_settings().cache_ttl_weather_hours)
-    logger.info(f"Weather retrieved for {location} (is_forecast={is_forecast}, horizon={horizon_days}d)")
+    logger.info(f"Weather retrieved for {resolved} (is_forecast={is_forecast}, horizon={horizon_days}d, src={source})")
     return out
 
 
@@ -500,10 +708,13 @@ def search_attractions(location: str, category: str = "tourist_attraction") -> d
     # Slim top-8 (WIN 8.5): trim description; keep name/type for grounding + planning.
     attractions = []
     for place in local_results[:8]:
+        name = place.get("title")
         attractions.append({
-            "name": place.get("title"),
+            "name": name,
             "rating": place.get("rating"),
             "type": place.get("type"),
+            # Actionable Google Maps link so the user can open the place directly.
+            "link": _maps_link(name, location, place.get("place_id"), place.get("gps_coordinates")),
             # Name kept intact (grounding identifier); description is free text.
             "description": _neutralize_injection((place.get("description") or "")[:120])
         })

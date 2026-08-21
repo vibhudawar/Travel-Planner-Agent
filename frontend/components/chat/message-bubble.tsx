@@ -4,6 +4,7 @@ import type { ChatMessage } from "@/lib/api"
 import { ItineraryView } from "@/components/itinerary/itinerary-view"
 
 import { Markdown } from "./markdown"
+import { ShareBar } from "./share-bar"
 
 const TOOL_LABEL: Record<string, string> = {
   search_flights: "flights",
@@ -45,7 +46,12 @@ export function MessageBubble({ message, pending }: { message: ChatMessage; pend
         ) : (
           <Markdown>{message.content}</Markdown>
         )}
-        {message.itinerary && <ItineraryView itinerary={message.itinerary} />}
+        {message.itinerary && (
+          <>
+            <ItineraryView itinerary={message.itinerary} />
+            {!pending && <ShareBar itinerary={message.itinerary} />}
+          </>
+        )}
       </div>
     </div>
   )

@@ -19,7 +19,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from api import db
 from api.auth import get_current_user
-from api.schemas import AuthedUser, ChatRequest, NewConversationRequest
+from api.schemas import AuthedUser, ChatRequest, NewConversationRequest, ShareRequest
 from api.streaming import sse_frame, stream_agent
 from backend import build_graph
 from settings import get_settings
@@ -96,6 +96,29 @@ def create_app() -> FastAPI:
         from locations import search_locations
 
         return {"results": search_locations(q, limit=max(1, min(limit, 20)))}
+
+    @app.post("/share")
+    async def share_itinerary(
+        body: ShareRequest,
+        user: AuthedUser = Depends(get_current_user),
+        pool: AsyncConnectionPool = Depends(get_pool),
+    ):
+        """Freeze an itinerary as a public snapshot; returns its short code."""
+        itinerary = body.itinerary
+        if not itinerary.get("destination"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "itinerary has no destination")
+        short_code = await db.create_shared_itinerary(
+            pool, user.id, itinerary.get("destination"), itinerary
+        )
+        return {"short_code": short_code}
+
+    @app.get("/shared/{short_code}")
+    async def get_shared(short_code: str, pool: AsyncConnectionPool = Depends(get_pool)):
+        """Public, read-only snapshot by short code (no auth, no user data)."""
+        snapshot = await db.get_shared_itinerary(pool, short_code)
+        if not snapshot:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "shared itinerary not found")
+        return snapshot
 
     @app.post("/conversations")
     async def create_conversation(

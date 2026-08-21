@@ -31,7 +31,8 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const path = request.nextUrl.pathname
-  const isPublic = path.startsWith("/login") || path.startsWith("/auth")
+  // /i/<code> are public read-only shared itineraries (no auth, no chat).
+  const isPublic = path.startsWith("/login") || path.startsWith("/auth") || path.startsWith("/i/")
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()

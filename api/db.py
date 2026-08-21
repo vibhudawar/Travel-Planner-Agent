@@ -7,9 +7,11 @@ app enforces ownership even though the pool connects with the service role
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from typing import Optional
 
+from psycopg.types.json import Json
 from psycopg_pool import AsyncConnectionPool
 
 from api.schemas import ConversationSummary
@@ -56,3 +58,35 @@ async def touch_conversation(
             "title = COALESCE(title, %s) WHERE id = %s",
             (title, conv_id),
         )
+
+
+async def create_shared_itinerary(
+    pool: AsyncConnectionPool, user_id: str, destination: Optional[str], itinerary: dict
+) -> str:
+    """Freeze an itinerary under a new unguessable short code and return the code."""
+    async with pool.connection() as conn:
+        for _ in range(5):  # retry on the (astronomically unlikely) code collision
+            short_code = secrets.token_urlsafe(8)
+            try:
+                await conn.execute(
+                    "INSERT INTO shared_itineraries (short_code, user_id, destination, itinerary) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (short_code, user_id, destination, Json(itinerary)),
+                )
+                return short_code
+            except Exception:
+                await conn.rollback()
+        raise RuntimeError("Could not allocate a unique share code")
+
+
+async def get_shared_itinerary(pool: AsyncConnectionPool, short_code: str) -> Optional[dict]:
+    """Return a public snapshot {itinerary, destination, created_at} or None. No user_id."""
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT itinerary, destination, created_at FROM shared_itineraries WHERE short_code = %s",
+            (short_code,),
+        )
+        row = await cur.fetchone()
+    if not row:
+        return None
+    return {"itinerary": row[0], "destination": row[1], "created_at": row[2].isoformat()}

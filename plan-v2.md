@@ -304,6 +304,31 @@ Each win lists: **what**, **why it's a win**, **files**, **effort**, **success m
 - **Success metric:** end-to-end authenticated, streamed itinerary in the browser with
   clickable per-fact sources and freshness stamps; concurrent users don't hit DB-lock errors.
 
+### WIN 9.6 — Actionability & trustworthy output (DONE & MERGED, PR #14, 2026-08-21)
+A post-launch reliability pass driven by real use of the app. Delivered:
+- **Correct prices in the user's currency:** flight/hotel currency is stamped `USD` in code
+  (the LLM was mislabeling USD as ₹); zero/missing-rate options are excluded so a bogus `$0`
+  can't win the cheapest-budget pick; every price is shown in the user's home currency (₹)
+  with USD in parens via a **live FX rate** (`fx.py` → open.er-api.com, 24h cached, static
+  fallback); the stated budget cap is captured and over/under-budget is flagged.
+- **Actionable links (code-authored, not the LLM):** `enrich.py` attaches real URLs to
+  verified facts — hotel links, Google Maps deep-links for attractions, Google Flights route
+  links — matched by identity after verification.
+- **Weather without a paid key:** replaced the OpenWeather One Call endpoint (401) with a free
+  stack (OpenWeather 5-day / Open-Meteo forecast ≤16d / Open-Meteo last-year archive for
+  seasonal); per-day lines are built in code and the forecast/seasonal caveat is shown once.
+- **City→airport resolution (production-style):** offline `airportsdata` (~7.9k) + alias/hub
+  layers (`locations.py`) handle duplicate names & 3-letter/code collisions (Goa→GOI, Leh→IXL);
+  a `/locations` endpoint feeds a From/To **autocomplete** + trip-setup form, so a user types a
+  city, never an airport code.
+- **Frontend correctness:** the chat stream is proxied same-origin (`app/api/chat/stream`) using
+  the server session token — fixes the browser `getSession()` returning null (chat never reached
+  the backend) and removes CORS; hydration mismatches fixed; shadcn theme/fonts applied;
+  `ItineraryView` split into per-section components.
+- **Cleanup:** dead code removed (`to_home`, `_FX_NOTE`, unused import); WHY-only comments
+  (docs/win-9-scope.md §8 anti-slop rules).
+- **Metrics:** 7/7 tool-hardening + 21/21 deterministic tests green; frontend typecheck + lint green.
+
 ---
 
 ## 4. Sequencing (dependency-ordered)

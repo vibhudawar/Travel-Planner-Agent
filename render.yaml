@@ -1,0 +1,39 @@
+# Render Blueprint for the FastAPI backend. Create the service via
+# render.com/dashboard "New +" -> "Blueprint" pointing at this repo, then set the
+# secret env vars (sync:false) in the dashboard. Health check hits /readyz.
+services:
+  - type: web
+    name: travel-planner-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /readyz
+    autoDeploy: true
+    envVars:
+      # --- Secrets: set these in the Render dashboard (never commit) ---
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SERPAPI_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      # Session-pooler DSN (aws-0-<region>.pooler.supabase.com:5432) — resolves on
+      # IPv4 and supports prepared statements. NOT the direct db.<ref> host.
+      - key: DATABASE_POOLED_URL
+        sync: false
+      # Comma-separated allowed origins — set to your Vercel URL(s).
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: LANGSMITH_API_KEY
+        sync: false
+      # --- Non-secret config ---
+      - key: OPENAI_DEFAULT_MODEL
+        value: gpt-5.4-nano
+      - key: LANGSMITH_TRACING
+        value: "true"
+      - key: LANGSMITH_PROJECT
+        value: TripPlannerAgent

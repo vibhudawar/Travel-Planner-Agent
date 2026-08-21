@@ -14,7 +14,15 @@ export default async function ChatPage({
     const supabase = await createClient()
     const { data } = await supabase.auth.getSession()
     const token = data.session?.access_token
-    if (token) initialMessages = (await getConversation(conversationId, token)) ?? []
+    if (token) {
+      try {
+        initialMessages = (await getConversation(conversationId, token)) ?? []
+      } catch {
+        // Backend momentarily unreachable — render the chat shell rather than
+        // crashing the whole route; history reloads on the next navigation.
+        initialMessages = []
+      }
+    }
   }
 
   // Key by conversation so switching threads mounts a fresh view with its history.

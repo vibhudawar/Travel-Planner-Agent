@@ -3,9 +3,11 @@
 
 import type { Itinerary } from "@/types/itinerary"
 
-// Defaults to the local backend so dev works without extra config; override with
-// NEXT_PUBLIC_API_URL in production (Render URL).
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+// Server-side calls (getConversation/listConversations from Server Components) and
+// the proxy routes must resolve the SAME backend. Prefer the server-only API_URL
+// (matches app/api/*/route.ts), then NEXT_PUBLIC_API_URL, then local dev.
+const API_URL =
+  process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
 export type ChatMessage = {
   role: "user" | "assistant"

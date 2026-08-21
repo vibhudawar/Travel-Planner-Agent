@@ -1,8 +1,13 @@
 # Direct dependencies only (transitives resolved by pip). A full lockfile
 # (pyproject + uv.lock) lands with the professionalization track (plan-v2.md §6).
 
-# Agent framework (LangGraph)
+# Agent framework (LangGraph). Pin the whole ecosystem together — langgraph 1.0.0's
+# transitive deps (prebuilt/checkpoint/sdk) float otherwise, and a newer
+# langgraph-prebuilt imports symbols the 1.0 core lacks (ImportError: ExecutionInfo).
 langgraph==1.0.0
+langgraph-prebuilt==1.0.0             # must match the langgraph 1.0 core
+langgraph-checkpoint==2.1.2           # core checkpoint; a 3.x breaks langgraph 1.0
+langgraph-sdk==0.2.9
 langgraph-checkpoint-sqlite==2.0.11   # SqliteSaver checkpointer (Postgres arrives in WIN 9)
 
 # LLM (LangChain + OpenAI)

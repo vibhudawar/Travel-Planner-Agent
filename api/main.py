@@ -21,7 +21,7 @@ from api import db
 from api.auth import get_current_user
 from api.schemas import AuthedUser, ChatRequest, NewConversationRequest, ShareRequest
 from api.streaming import sse_frame, stream_agent
-from backend import build_graph
+from backend import build_graph, remember_skeleton, serve_from_cache
 from settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -173,9 +173,26 @@ def create_app() -> FastAPI:
         async def event_stream():
             if is_new:
                 yield sse_frame("conversation", {"conversation_id": thread_id})
+
+            # WIN 9.2: try the semantic cache first — a hit reuses the stable skeleton
+            # with freshly-fetched prices, skipping the LLM/tool loop. Falls through to
+            # the full graph on a miss or any error.
+            cached = await serve_from_cache(pool, graph, thread_id, body.message)
+            if cached is not None:
+                yield sse_frame("token", cached["note"])
+                yield sse_frame("tool", ["search_flights", "search_hotels"])
+                yield sse_frame("itinerary", cached["itinerary"])
+                yield sse_frame("done", {"thread_id": thread_id})
+                await db.touch_conversation(pool, thread_id, body.message[:60])
+                return
+
             async for frame in stream_agent(graph, thread_id, body.message):
                 yield frame
             await db.touch_conversation(pool, thread_id, body.message[:60])
+
+            # Remember the produced skeleton for future near-identical requests.
+            state = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+            await remember_skeleton(pool, body.message, state.values.get("itinerary"))
 
         return StreamingResponse(
             event_stream(),

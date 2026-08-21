@@ -87,8 +87,11 @@ def _to_location(a) -> Location:
 
 
 def _canonical(query: str) -> str:
-    """Normalize + apply city aliases (Kochi->Cochin), dropping a country suffix."""
-    q = _norm(query).split(",")[0].strip()
+    """Normalize + apply city aliases (Kochi->Cochin), dropping a country suffix and
+    any parenthetical code. Split/strip on the RAW string — _norm removes the comma,
+    so this must run before normalizing (else 'Hanoi, Vietnam' never truncates)."""
+    head = re.sub(r"\(.*?\)", "", str(query or "").split(",")[0])
+    q = _norm(head)
     return _CITY_ALIASES.get(q, q)
 
 

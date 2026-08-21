@@ -7,26 +7,28 @@ can supply an in-memory fake.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Optional, TypedDict
 
-from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+import cache
 from compute import compute_budget
 from enrich import attach_links
 from observability import configure_tracing
 from prompts import TRIP_PLANNER_SYSTEM_PROMPT, TRIP_SYNTHESIS_PROMPT
-from schema import Budget, BudgetItem, ItineraryDraft, WeatherDay, finalize_itinerary
+from schema import Budget, BudgetItem, FlightOption, HotelOption, ItineraryDraft, WeatherDay, finalize_itinerary
 from settings import get_settings
-from tools import ALL_TOOLS
+from tools import ALL_TOOLS, google_flights_link, search_flights, search_hotels
 from verifier import verify_itinerary
 
 
@@ -47,6 +49,137 @@ def _budget_payload(computed: dict) -> dict:
         "over_by_home": computed["over_by_home"],
         "assessment": computed["assessment"],
     }
+
+
+# --- WIN 9.2: semantic response cache (serve on hit / remember on miss) ---
+
+
+async def remember_skeleton(pool, message: str, itinerary: Optional[dict]) -> None:
+    """Store the stable itinerary skeleton for future near-identical requests."""
+    settings = get_settings()
+    if not settings.enable_semantic_cache or not itinerary:
+        return
+    slots = {
+        k: itinerary.get(k)
+        for k in ("destination", "start_date", "end_date", "travelers", "budget_cap", "budget_currency")
+    }
+    slot_key = cache.canonical_slot_key(slots)
+    if not slot_key:
+        return
+    try:
+        embedding = await asyncio.to_thread(cache.embed, message)
+        skeleton = {k: itinerary.get(k) for k in cache.SKELETON_FIELDS}
+        await cache.store(pool, slot_key, message[:200], embedding, skeleton, settings.semantic_cache_ttl_hours)
+    except Exception as exc:  # noqa: BLE001 - caching must never break a turn
+        logger.warning("remember_skeleton failed: %s", exc)
+
+
+def _flight_options(raw: dict, origin: str, dest: str, date: Optional[str]) -> list[FlightOption]:
+    link = google_flights_link(origin, dest, date)
+    return [
+        FlightOption(
+            airline=f.get("airline") or "?", price=f.get("price"), currency="USD",
+            depart_time=f.get("departure_time"), arrive_time=f.get("arrival_time"),
+            stops=f.get("stops"), booking_link=link,
+        )
+        for f in (raw or {}).get("flights", [])
+        if f.get("price")
+    ]
+
+
+def _hotel_options(raw: dict) -> list[HotelOption]:
+    return [
+        HotelOption(
+            name=h.get("name") or "?", price_per_night=h.get("price"), currency="USD",
+            rating=h.get("rating"), link=h.get("link"),
+        )
+        for h in (raw or {}).get("hotels", [])
+        if h.get("price")
+    ]
+
+
+async def serve_from_cache(pool, graph, thread_id: str, message: str) -> Optional[dict]:
+    """On a slot+intent cache hit, rebuild the itinerary from the cached skeleton with
+    FRESH prices, persist the turn to the thread, and return {note, itinerary}. None on
+    miss or any error (the caller then runs the full graph)."""
+    settings = get_settings()
+    if not settings.enable_semantic_cache:
+        return None
+    try:
+        slots = await asyncio.to_thread(cache.extract_slots, message)
+        if not slots or not slots.get("is_plan"):
+            return None
+        slot_key = cache.canonical_slot_key(slots)
+        if not slot_key:
+            return None
+        # Embed the same text remember_skeleton stored (the message) so similar
+        # requests land close; the slot key already enforces hard equivalence.
+        embedding = await asyncio.to_thread(cache.embed, message)
+        skeleton = await cache.lookup(
+            pool, slot_key, embedding, settings.cache_similarity_threshold, settings.semantic_cache_ttl_hours
+        )
+        if not skeleton:
+            return None
+
+        origin = slots.get("origin") or skeleton.get("origin")
+        dest = skeleton.get("destination") or slots.get("destination")
+        start, end = skeleton.get("start_date"), skeleton.get("end_date")
+        travelers = skeleton.get("travelers") or slots.get("travelers") or 2
+        if not origin or not dest or not start:
+            return None  # can't refresh prices safely -> fall through to the full graph
+
+        flights_raw, hotels_raw = await asyncio.gather(
+            asyncio.to_thread(
+                search_flights.invoke,
+                {"departure": origin, "arrival": dest, "outbound_date": start, "return_date": end, "adults": travelers},
+            ),
+            asyncio.to_thread(
+                search_hotels.invoke,
+                {"location": dest, "check_in_date": start, "check_out_date": end, "adults": travelers},
+            ),
+        )
+
+        draft = ItineraryDraft(
+            destination=dest, origin=origin, start_date=start, end_date=end, travelers=travelers,
+            budget_cap=skeleton.get("budget_cap"), budget_currency=skeleton.get("budget_currency"),
+            overview=skeleton.get("overview"),
+            flights=_flight_options(flights_raw, origin, dest, start),
+            hotels=_hotel_options(hotels_raw),
+            weather=skeleton.get("weather") or [],
+            attractions=skeleton.get("attractions") or [],
+            days=skeleton.get("days") or [],
+            tips=skeleton.get("tips") or [],
+        )
+        called = ["search_flights", "search_hotels"]
+        if draft.attractions:
+            called.append("search_attractions")
+        if draft.weather:
+            called.append("search_weather")
+        itinerary = finalize_itinerary(draft, called)
+        computed = compute_budget(
+            itinerary.model_dump(mode="python"), travelers,
+            budget_cap=itinerary.budget_cap, budget_currency=itinerary.budget_currency,
+        )
+        itinerary.budget = Budget(
+            **{**_budget_payload(computed), "items": [BudgetItem(**i) for i in computed["items"]]}
+        )
+        itin_dict = itinerary.model_dump(mode="json")
+        itin_dict["verification"] = {
+            "status": "verified", "n_removed": 0, "disclaimers": [],
+            "verifier_model": settings.judge_model, "cached": True,
+        }
+
+        note = f"Reusing your recent {dest} plan with freshly-checked flight and hotel prices."
+        config = {"configurable": {"thread_id": thread_id}}
+        await graph.aupdate_state(
+            config,
+            {"messages": [HumanMessage(content=message), AIMessage(content=note)], "itinerary": itin_dict},
+        )
+        logger.info("Semantic cache HIT for thread %s (slot_key=%s)", thread_id, slot_key)
+        return {"note": note, "itinerary": itin_dict}
+    except Exception as exc:  # noqa: BLE001 - never break a turn on the cache path
+        logger.warning("serve_from_cache failed: %s", exc)
+        return None
 
 logger = logging.getLogger(__name__)
 
